@@ -114,6 +114,10 @@ Also bind `LISTEN_HOST` to a management address if you can.
 
 The pages follow your system's light or dark setting automatically, switch when it changes while the page is open, and have no flash of the wrong theme on load. The theme button (bottom left in the app, top right on the login page) cycles Auto, Light and Dark; a Light or Dark choice is remembered by that browser, and choosing Auto goes back to following the system.
 
+## Internet access
+
+dnsbench itself needs none. The web interface, including its icons and charts, is built into the binary and loads no fonts, scripts, styles or images from other sites, so it works on an isolated network; the REST API never needed one either. The installer uses the network only to install missing build packages (a C compiler, the PAM headers and Go) through your package manager. Install those first, or set `DNSBENCH_SKIP_DEPS=1`, and it builds offline.
+
 ---
 
 ## Protocols
@@ -127,7 +131,9 @@ The pages follow your system's light or dark setting automatically, switch when 
 
 DoQ (DNS over QUIC) is not supported: QUIC is not in Go's standard library and this project deliberately has no other dependencies.
 
-The server can be written as `host`, `host:port`, `[ipv6]:port`, or for DoH a full URL such as `https://dns.example/dns-query`. The name is resolved once at the start of a run and every worker connects to that address.
+The server can be written as `host`, `host:port`, `[ipv6]:port`, or for DoH a full URL such as `https://dns.example/dns-query`. The name is resolved once at the start of a run and every worker connects to that address. For DoH the request goes to that resolved address, and the name you typed is sent as the `Host` header and as the TLS server name, so certificate checks and virtual hosting behave as if you had connected by name.
+
+A server string is checked before anything is sent: the port must be a number from 1 to 65535, the host an IP address or a plain name (no `@`, `/`, `?`, `#`, spaces or other URL characters), and a DoH path must start with `/` and contain no control characters. Anything else is refused with HTTP 400 and a message such as `invalid port` or `invalid server`, for a job and for a schedule alike.
 
 ---
 

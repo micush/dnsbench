@@ -69,7 +69,7 @@ func lightness(t *testing.T, s string) float64 {
 
 func palettes(t *testing.T) (dark, light map[string]string) {
 	dark = block(t, benchHTML, "    :root {")
-	light = block(t, benchHTML, `[data-bs-theme="light"] {`)
+	light = block(t, benchHTML, `[data-theme="light"] {`)
 	// The light block overrides the dark one: start from dark, apply light.
 	merged := map[string]string{}
 	for k, v := range dark {
@@ -144,7 +144,7 @@ func TestDarkThemeIsNotTooDark(t *testing.T) {
 
 func TestLightThemeOverridesEveryDarkColour(t *testing.T) {
 	dark := block(t, benchHTML, "    :root {")
-	light := block(t, benchHTML, `[data-bs-theme="light"] {`)
+	light := block(t, benchHTML, `[data-theme="light"] {`)
 	shared := map[string]bool{"accent": true, "accent2": true, "radius": true, "sidebar-w": true}
 	for k := range dark {
 		if _, ok := light[k]; !ok && !shared[k] {
@@ -164,8 +164,8 @@ func TestPagesUseTheSharedThemeScript(t *testing.T) {
 		if !strings.Contains(page, `name="color-scheme"`) {
 			t.Errorf("%s page lacks the color-scheme meta tag", name)
 		}
-		if strings.Contains(page, `data-bs-theme="auto"`) {
-			t.Errorf(`%s page still starts with data-bs-theme="auto", which is not a valid theme`, name)
+		if strings.Contains(page, `data-theme="auto"`) {
+			t.Errorf(`%s page still starts with data-theme="auto", which is not a valid theme`, name)
 		}
 		if strings.Contains(page, "localStorage.getItem('dnsbench-theme')") || strings.Contains(page, "function toggleTheme") {
 			t.Errorf("%s page still carries its own copy of the theme code", name)

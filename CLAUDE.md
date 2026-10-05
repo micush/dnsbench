@@ -8,7 +8,7 @@ are asked to change this project, follow the process below without being told to
 
 **Layout.** The tarball has `README.md`, `LICENSE.txt`, `install.sh`, `uninstall.sh` and this file at
 the top, `docs/CHANGELOG.md`, `source/` (the Go module: `go.mod`, every `*.go`, `web/*.html`, and
-`VERSION`, which must sit next to the Go files because `server.go` embeds it, and `web/theme.js`, the one shared theme script the three pages load), and `contrib/` (the
+`VERSION`, which must sit next to the Go files because `server.go` embeds it, plus the shared front-end files the pages load: `web/theme.js` (the one theme script), `web/ui.css` (all base styling and the icons) and `web/charts.js` (the comparison charts)), and `contrib/` (the
 systemd unit, the example config, the PAM service, and the `perf/` and `uitest/` tools). The `.git`
 directory is part of the archive exactly as received; never modify it. All Go commands below run in
 `source/`. The installer expects `source/go.mod`, `source/VERSION`, `contrib/dnsbench.service`,
@@ -97,15 +97,15 @@ live check for the area you touched.
 - **Touched the UI (`web/*.html`)?** `node --check` every inline `<script>` (replace
   `__SERVER_CPU_THREADS__` first), grep for dangling references to anything you removed, and run
   `contrib/uitest/ui.js` in real Chromium (light and dark). Its header says how: Playwright and
-  Chromium are installed in the sandbox, and Bootstrap, Bootstrap Icons and Chart.js come from
-  `npm pack` because the CDN is unreachable. A syntax check alone missed nothing here, but a dangling
-  reference to a removed element would only show at runtime. Look at a screenshot when layout changed.
+  Chromium are installed in the sandbox, and nothing else is needed, because the UI loads nothing from
+  other hosts (the test refuses every such request and fails if one is made). A syntax check alone
+  missed nothing here, but a dangling reference to a removed element would only show at runtime. Look at a screenshot when layout changed.
   **Themes:** the pages follow the system light/dark setting by default (an explicit choice is kept in
   `localStorage` `dnsbench-theme`); `web/theme.js` is the only theme code, loaded from `<head>` so the
-  theme is set before the first paint, and it always sets `data-bs-theme` to `light` or `dark`
-  (never `auto`, which is not a Bootstrap value and once left light-OS users with a dark page and light
+  theme is set before the first paint, and it always sets `data-theme` to `light` or `dark`
+  (never `auto`, which matches no rule and once left light-OS users with a dark page and light
   widgets). All colours come from the palette tokens in `bench.html` (`:root` is dark, the
-  `[data-bs-theme="light"]` block overrides it); the light block must override every colour the dark one
+  `[data-theme="light"]` block overrides it); the light block must override every colour the dark one
   defines, charts read the tokens at draw time, and no theme-specific colour may be hard-coded in markup
   or script. `theme_test.go` reads the palette out of the page and enforces contrast ratios and that the
   dark theme is not too dark; `ui.js` additionally checks the rendered page (nothing half-dark or
@@ -154,6 +154,32 @@ live check for the area you touched.
   `docs.go` renders (headings, fenced code, flat lists, tables, `**bold**`, `` `code` ``, links); the
   in-app ReadMe page is that file, and `TestShippedReadmeRenders` checks it.
 
+- **Touched code that sends network requests or reads user input (`stream.go`, `bench.go`, `server.go`,
+  `docs.go`, the pages)?** Run CodeQL locally, because GitHub runs it on `main` and an alert there is a
+  release blocker. The bundle downloads from `github.com` (about 700 MB; `curl -sL -o b.tgz
+  https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz`, unpack
+  it, `codeql/codeql` is the CLI). With `GOFLAGS=-buildvcs=false CGO_ENABLED=1` run
+  `codeql database create DB --language=go --source-root=source --command="go build -o /dev/null ."`
+  then `codeql database analyze DB codeql/go-queries:codeql-suites/go-code-scanning.qls
+  --format=sarif-latest --output=out.sarif` (a few minutes; run it detached and poll, and not while
+  measuring performance, it takes the only CPU). The expected result is zero findings. For the history:
+  `go/request-forgery` (critical) fired on the DoH `client.Do`. The tool is meant to be aimed at any
+  host by a signed-in user (see Notes), so the capability stays; what was fixed is how the target is
+  handled: `checkTarget` returns the port as a number and `parseParams` stores `strconv.Itoa` of it (it
+  must stay a **pure function with the result assigned afterwards**: an overwrite of `p.port` through a
+  pointer does not clear the taint, which was tried and still alerted), the DoH request URL names the
+  resolved address (`c.hostport`), and the name the user typed travels only as `req.Host` and
+  `tls.Config.ServerName`. `TestDoHKeepsTypedNameForHostAndSNI` fails if either is dropped. Do not
+  "fix" a future alert by weakening the target checks or by hiding the flow; reshape the code so the
+  value really is the checked one, and re-run CodeQL.
+- **Touched DoH?** Besides the unit tests, run a stdlib responder in its own process
+  (`httptest.NewUnstartedServer`, replace its `Listener` with one on a fixed port, `EnableHTTP2 = true`,
+  `StartTLS()`, answer with the query bytes and the QR bit set) and drive both an IP and a hostname
+  (`localhost:PORT`) through `contrib/perf/drive.py` with `{"protocol":"doh","doh_method":"post"|"get",
+  "doh_protocol":"2"}` on the old and new build; have the responder print each distinct
+  (protocol, method, Host, SNI) it sees and compare. A dead responder looks like a broken engine here
+  too: check it is alive first.
+
 ## Sandbox notes
 
 - The tool runs commands with `sh`, not `bash`: put anything using arrays, `${PIPESTATUS}`, `[[`,
@@ -167,6 +193,13 @@ live check for the area you touched.
 
 ## Notes
 
+- Front end: **no third-party code and no CDN**, same rule as the Go side. Styling is `web/ui.css`
+  (tokens at the top, `bench.html` maps them onto its palette), icons are `<i class="bi bi-NAME">` and
+  are drawn in `contrib/icons/gen.py`, which rewrites the marked block of `ui.css`: add a shape there,
+  run it, never hand-edit the block. Charts are `web/charts.js`; the schedule editor is a native
+  `<dialog>` (`showModal()`). Class names like `btn`, `d-flex` or `mb-3` are just this project's own
+  rules now, and `assets_test.go` fails if a page uses a class or icon that `ui.css` does not define,
+  or refers to another host. Do not add a `<link>` or `<script>` to anything outside the daemon.
 - Dependencies: **stdlib only** by design. The one non-Go dependency is libpam through cgo. Don't add a
   module for something small; if one is truly warranted, say so in the changelog. This is why DoQ is
   not supported (QUIC is not in the standard library); don't re-add it as a stub.

@@ -80,7 +80,7 @@ func renderMarkdown(md string) string {
 		case strings.HasPrefix(trimmed, "```"):
 			flushPara()
 			closeList()
-			out.WriteString(`<pre class="bg-body-secondary rounded p-3"><code>`)
+			out.WriteString(`<pre class="doc-code"><code>`)
 			for i++; i < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[i]), "```"); i++ {
 				out.WriteString(html.EscapeString(lines[i]) + "\n")
 			}
@@ -104,7 +104,7 @@ func renderMarkdown(md string) string {
 		case isTableRow(trimmed):
 			flushPara()
 			closeList()
-			out.WriteString(`<table class="table table-sm table-bordered w-auto">` + "\n")
+			out.WriteString(`<table class="doc-table">` + "\n")
 			head := true
 			for ; i < len(lines) && isTableRow(lines[i]); i++ {
 				if head {

@@ -28,6 +28,12 @@ var docHTML string
 //go:embed web/theme.js
 var themeJS string
 
+//go:embed web/ui.css
+var uiCSS string
+
+//go:embed web/charts.js
+var chartsJS string
+
 //go:embed VERSION
 var versionFile string
 
@@ -147,6 +153,8 @@ func (a *App) routes() http.Handler {
 
 	mux.HandleFunc("GET /{$}", a.handleRoot)
 	mux.HandleFunc("GET /theme.js", a.handleThemeJS)
+	mux.HandleFunc("GET /ui.css", a.handleUICSS)
+	mux.HandleFunc("GET /charts.js", a.handleChartsJS)
 	mux.HandleFunc("GET /login", a.handleLoginPage)
 	mux.HandleFunc("POST /login", a.handleLoginForm)
 	mux.HandleFunc("GET /logout", a.handleLogout)
@@ -322,6 +330,16 @@ func (a *App) handleRoot(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleThemeJS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	io.WriteString(w, themeJS)
+}
+
+func (a *App) handleUICSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	io.WriteString(w, uiCSS)
+}
+
+func (a *App) handleChartsJS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	io.WriteString(w, chartsJS)
 }
 
 func (a *App) handleLoginPage(w http.ResponseWriter, r *http.Request) {

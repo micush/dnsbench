@@ -863,7 +863,7 @@ func TestPageServesThemeScriptWithoutLogin(t *testing.T) {
 	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/javascript") {
 		t.Fatalf("theme.js: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
-	for _, want := range []string{"prefers-color-scheme", "dnsbench-theme", "toggleTheme", "data-bs-theme"} {
+	for _, want := range []string{"prefers-color-scheme", "dnsbench-theme", "toggleTheme", "data-theme"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("theme.js lacks %q", want)
 		}

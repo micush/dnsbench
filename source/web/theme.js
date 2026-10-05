@@ -34,8 +34,8 @@
 
   function apply() {
     var t = effective();
-    var changed = root.getAttribute('data-bs-theme') !== t;
-    root.setAttribute('data-bs-theme', t);
+    var changed = root.getAttribute('data-theme') !== t;
+    root.setAttribute('data-theme', t);
     root.setAttribute('data-theme-mode', mode());
     buttons();
     if (changed && typeof window.onThemeChange === 'function') window.onThemeChange();

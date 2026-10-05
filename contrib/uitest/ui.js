@@ -1,13 +1,13 @@
 // Real-browser smoke test for the dnsbench UI (Chromium via Playwright).
 //
 // Needs: a running dnsbench (plain HTTP, --no-tls), a PAM user, a UDP responder
-// on 127.0.0.1:5399 (contrib/perf/reflect.c), README.md and LICENSE.txt next to
-// the dnsbench binary, and Bootstrap 5.3.3, Bootstrap Icons 1.11.3 and Chart.js
-// 4.4.0 unpacked under CDN_DIR (npm pack them; the page loads them from a CDN
-// and this script serves them locally so it works offline).
+// on 127.0.0.1:5399 (contrib/perf/reflect.c), and README.md and LICENSE.txt next to
+// the dnsbench binary. Nothing else: the UI ships with the daemon and loads nothing
+// from other hosts. The test enforces that by refusing every request that does not go
+// to BASE and failing if the page attempts one.
 //
 //   PW=$(npm root -g)/playwright CHROME=/path/to/chrome BASE=http://127.0.0.1:8453 \
-//   CDN_DIR=/tmp/cdn/ UI_USER=benchuser UI_PASS=secret node ui.js
+//   UI_USER=benchuser UI_PASS=secret node ui.js
 //
 // UI_USER must be a member of the login group (LOGIN_GROUP, default dnsbench). Optionally
 // set UI_NONMEMBER_USER and UI_NONMEMBER_PASS to an account that is NOT in the group to
@@ -16,32 +16,18 @@
 // Runs the whole flow in light and dark colour schemes, including the theme behaviour.
 const { chromium } = require(process.env.PW);
 const fs = require('fs');
-const CDN = process.env.CDN_DIR || '/tmp/cdn/';
-const map = {
-  'bootstrap@5.3.3/dist/css/bootstrap.min.css': CDN + 'bootstrap-5.3.3/package/dist/css/bootstrap.min.css',
-  'bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js': CDN + 'bootstrap-5.3.3/package/dist/js/bootstrap.bundle.min.js',
-  'bootstrap-icons@1.11.3/font/bootstrap-icons.min.css': CDN + 'bootstrap-icons-1.11.3/package/font/bootstrap-icons.min.css',
-  'bootstrap-icons@1.11.3/font/fonts/bootstrap-icons.woff2': CDN + 'bootstrap-icons-1.11.3/package/font/fonts/bootstrap-icons.woff2',
-  'bootstrap-icons@1.11.3/font/fonts/bootstrap-icons.woff': CDN + 'bootstrap-icons-1.11.3/package/font/fonts/bootstrap-icons.woff',
-  'chart.js@4.4.0/dist/chart.umd.min.js': CDN + 'chart.js-4.4.0/package/dist/chart.umd.js',
-};
 const BASE = process.env.BASE;
 const USER = process.env.UI_USER || 'benchuser';
 const PASS = process.env.UI_PASS || 'Sup3rSecret!';
 let failures = 0;
+const external = new Set(); // requests the page tried to send anywhere but BASE
 const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok || !extra ? '' : '  -> ' + extra)); if (!ok) failures++; };
 
 (async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROME, args: ['--no-sandbox'] });
   for (const scheme of ['light', 'dark']) {
     const ctx = await browser.newContext({ colorScheme: scheme, viewport: { width: 1400, height: 1000 } });
-    await ctx.route(/cdn\.jsdelivr\.net\/npm\/(.*)/, route => {
-      const key = route.request().url().split('/npm/')[1].split('?')[0];
-      const f = map[key];
-      if (!f) return route.abort();
-      const type = f.endsWith('.css') ? 'text/css' : f.endsWith('.js') ? 'application/javascript' : 'font/woff2';
-      route.fulfill({ body: fs.readFileSync(f), contentType: type });
-    });
+    await ctx.route(u => !u.href.startsWith(BASE), route => { external.add(route.request().url()); route.abort(); });
     const page = await ctx.newPage();
     const errors = [];
     page.on('pageerror', e => errors.push('pageerror: ' + e.message));
@@ -81,7 +67,7 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     const sprotos = await page.$$eval('#schedProtocol option', os => os.map(o => o.value));
     check('schedule protocols have no doq', JSON.stringify(sprotos) === '["udp","tcp","dot","doh"]', JSON.stringify(sprotos));
     const nav = await page.$$eval('.sidebar .nav-link', as => as.map(a => a.textContent.trim()));
-    check('sidebar has no Server Info', JSON.stringify(nav) === '["Benchmark","Schedules","Results","ReadMe","License"]', JSON.stringify(nav));
+    check('sidebar has no Server Info', JSON.stringify(nav) === '["Benchmark","Results","Schedules","ReadMe","License"]', JSON.stringify(nav));
     check('sidebar shows the signed-in user', (await page.textContent('.sidebar')).includes(USER));
     const ta = await page.inputValue('#queryDomains');
     check('default query domains', ta === 'google.com\ncloudflare.com\ngithub.com', JSON.stringify(ta));
@@ -94,7 +80,7 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     check('queue field shown for UDP', await page.isVisible('#pipeline'));
 
     // ── Theme ────────────────────────────────────────────────────────────────
-    const attr = () => page.getAttribute('html', 'data-bs-theme');
+    const attr = () => page.getAttribute('html', 'data-theme');
     const mode = () => page.getAttribute('html', 'data-theme-mode');
     const stored = () => page.evaluate(() => localStorage.getItem('dnsbench-theme'));
     check(`theme: starts as ${scheme}, following the system (auto)`, (await attr()) === scheme && (await mode()) === 'auto');
@@ -112,11 +98,11 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     const other = wantLight ? 'dark' : 'light';
     const bgBefore = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     await page.emulateMedia({ colorScheme: other });
-    await page.waitForFunction(o => document.documentElement.getAttribute('data-bs-theme') === o, other);
+    await page.waitForFunction(o => document.documentElement.getAttribute('data-theme') === o, other);
     const bgOther = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     check('theme: follows an operating-system change live, without a reload', (await attr()) === other && bgOther !== bgBefore);
     await page.emulateMedia({ colorScheme: scheme });
-    await page.waitForFunction(s => document.documentElement.getAttribute('data-bs-theme') === s, scheme);
+    await page.waitForFunction(s => document.documentElement.getAttribute('data-theme') === s, scheme);
 
     const btn = () => page.locator('.sidebar [data-theme-toggle]');
     check('theme toggle explains itself', /Auto/.test(await btn().getAttribute('title')));
@@ -131,7 +117,7 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     check('toggle: the explicit choice survives a reload', (await attr()) === 'dark' && (await mode()) === 'dark');
     await btn().click();
     await page.emulateMedia({ colorScheme: scheme });
-    await page.waitForFunction(s => document.documentElement.getAttribute('data-bs-theme') === s, scheme);
+    await page.waitForFunction(s => document.documentElement.getAttribute('data-theme') === s, scheme);
     check('toggle: dark -> auto clears the choice and follows the system again', (await mode()) === 'auto' && (await stored()) === null && (await attr()) === scheme);
 
     // Text contrast, measured in the rendered page. Controls fade colours over 0.12 s, so
@@ -193,7 +179,7 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     // Add a schedule through the real modal
     await page.evaluate(() => showPage('schedules', document.querySelector('.nav-link[onclick*="schedules"]')));
     await page.click('button:has-text("Add Schedule")');
-    await page.waitForSelector('#schedModal.show');
+    await page.waitForSelector('#schedModal[open]');
     await page.waitForTimeout(400);
     const modalOk = await page.evaluate(() => {
       const probe = document.createElement('div'); probe.style.background = 'var(--bg2)'; document.body.appendChild(probe);
@@ -209,10 +195,56 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     await page.fill('#schedQueries', 'a.example');
     await page.selectOption('#schedFreq', 'hourly');
     await page.click('button:has-text("Save Schedule")');
-    await page.waitForSelector('#schedModal.show', { state: 'detached' }).catch(() => {});
+    await page.waitForSelector('#schedModal[open]', { state: 'detached' });
     await page.waitForFunction(() => document.getElementById('scheduleList').textContent.includes('ui-test'), null, { timeout: 10000 });
     check('schedule appears in list', (await page.textContent('#scheduleList')).includes('ui-test'));
     check('schedule timing label rendered', /Hourly/i.test(await page.textContent('#scheduleList')), (await page.textContent('#scheduleList')).slice(0, 200));
+
+    // Escape closes the dialog; the backdrop closes it too
+    await page.click('button:has-text("Add Schedule")');
+    await page.waitForSelector('#schedModal[open]');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#schedModal[open]', { state: 'detached' });
+    check('dialog: Escape closes it', true);
+    await page.click('button:has-text("Add Schedule")');
+    await page.waitForSelector('#schedModal[open]');
+    await page.mouse.click(5, 5); // on the dimmed backdrop
+    await page.waitForSelector('#schedModal[open]', { state: 'detached' });
+    check('dialog: a click on the backdrop closes it', true);
+
+    // Comparison charts: three runs, one with errors and one without a result
+    await page.evaluate(() => {
+      const mk = (started, server, qps, p95, errors, sent) => ({ started, args: { server, protocol: 'udp' }, stats: { qps, p95, errors, sent } });
+      runHistory.length = 0;
+      runHistory.push(mk('2026-10-05 09:00:01', '1.1.1.1', 48210, 12.4, 0, 96000));
+      runHistory.push(mk('2026-10-05 09:05:44', '8.8.8.8', 35120, 38.9, 420, 70000));
+      runHistory.push(mk('2026-10-05 09:10:12', '192.168.1.1', 1200, 71.3, 64, 2400));
+      runHistory.forEach(r => { r._selected = true; });
+      showPage('history', document.querySelector('.nav-link[onclick*="history"]'));
+      compareSelected();
+    });
+    await page.waitForTimeout(500);
+    const painted = id => page.evaluate(i => {
+      const c = document.getElementById(i), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      const bg = [d[0], d[1], d[2]]; let diff = 0;
+      for (let k = 0; k < d.length; k += 4 * 7) if (Math.abs(d[k] - bg[0]) + Math.abs(d[k + 1] - bg[1]) + Math.abs(d[k + 2] - bg[2]) > 40) diff++;
+      return { w: c.width, h: c.height, diff };
+    }, id);
+    const q = await painted('compareQpsCanvas'), p95 = await painted('compareP95Canvas');
+    check('charts: throughput chart is drawn', q.w > 100 && q.h > 50 && q.diff > 200, JSON.stringify(q));
+    check('charts: p95 chart is drawn', p95.w > 100 && p95.h > 50 && p95.diff > 200, JSON.stringify(p95));
+    const box = await page.locator('#compareQpsCanvas').boundingBox();
+    let tip = '';
+    for (let x = box.x + 80; x < box.x + box.width && !tip; x += 12) {
+      for (let y = box.y + box.height - 40; y > box.y + 10; y -= 6) {
+        await page.mouse.move(x, y);
+        const t = await page.$('[role=tooltip]');
+        if (t && await t.isVisible()) { tip = await t.innerText(); break; }
+      }
+    }
+    check('charts: hovering a bar shows run, rate and errors', /1\.1\.1\.1/.test(tip) && /q\/s/.test(tip) && /errors/.test(tip), tip);
+    await page.evaluate(() => closeCompare());
+    check('charts: closing removes the tooltip', (await page.locator('[role=tooltip]').count()) === 0);
 
     // Docs pages
     await page.evaluate(() => showPage('readme', document.querySelector('.nav-link[onclick*="readme"]')));
@@ -224,6 +256,7 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
 
     const real = errors.filter(e => !e.includes('401')); // the 401 is the deliberate wrong-password attempt
     check('no JS or resource errors in the browser', real.length === 0, real.join(' | '));
+    check('nothing was requested from outside the server', external.size === 0, [...external].join(' '));
     await ctx.close();
   }
   await browser.close();

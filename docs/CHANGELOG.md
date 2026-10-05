@@ -1,5 +1,41 @@
 # Changelog
 
+## [v3] - 2026-10-05 — The web interface loads nothing from the internet; DoH targets checked (CodeQL alert); sidebar reordered
+
+### Changed
+- **The UI is self-contained.** Bootstrap, Bootstrap Icons and Chart.js, which the pages used to fetch from a CDN, are replaced by code written for this project and embedded in the binary: `web/ui.css` (base element styles, the utility classes, buttons, form controls, the sign-in alert, the status badge, the spinner, the schedule dialog, README/License typography, and 34 hand-drawn icons painted as CSS masks) and `web/charts.js` (a canvas bar chart with axes, rounded bars, 20 ms / 50 ms guide lines, error markers and hover tooltips). They are served at `/ui.css` and `/charts.js` without a login, like `/theme.js`. No third-party code was added, so the standard-library-only rule stands.
+- The schedule editor is a native `<dialog>`: Esc and a click on the backdrop close it.
+- Comparison charts round the value axis up to the next tick, so the tallest bar no longer touches the top.
+- Sidebar: Results now sits above Schedules, and ReadMe and License sit at the foot of the list, just above the separator.
+- The theme attribute is now `data-theme` (was `data-bs-theme`), and the palette tokens that pages map onto the shared stylesheet are `--body-bg`, `--body-color`, `--secondary-bg`, `--tertiary-bg` and `--border-color` (were `--bs-*`). README and License pages use `doc-table` and `doc-code`; code blocks there follow the page palette and are slightly lighter than before.
+- **Server strings are checked before anything is sent** (`checkTarget`): the port must be a number from 1 to 65535 (`dns.example:0053` is now `53`); the host must be an IP address or a name of at most 253 bytes with no space or control character and none of `@ / \ ? # : [ ] % " < >` or a backtick; a DoH path must start with `/` and contain no control character. A malformed target is refused with HTTP 400 (`invalid port`, `invalid server`, `invalid path`) from `/api/start-job` and the schedule endpoints, and a stored schedule with one now ends in the same error instead of a failed lookup. Targets that were valid before are unchanged.
+- **DoH connects by address, not by the typed text.** The request URL now names the address resolved at the start of the run (the same one every worker already dialled); the name the user typed is sent as the `Host` header and as the TLS server name, so SNI, certificate checks and virtual hosting are as before (an IP target still sends no SNI). Nothing else about DoH changed.
+
+### Added
+- `contrib/icons/gen.py` regenerates the icon block of `ui.css` from the shapes drawn in it (`--sheet` prints a contact sheet).
+- `assets_test.go`: no page, style or script refers to another host or a CDN name, every icon the pages use has a rule, `/ui.css` and `/charts.js` are served without login, README/License markup uses the project's own classes, and every utility class the pages rely on is defined.
+- `contrib/uitest/ui.js` now needs no CDN files, refuses every request that does not go to the server and fails if the page makes one, and also checks the dialog (Esc, backdrop) and the charts (drawn, hover tooltip, removed on close).
+
+### Fixed
+- **CodeQL alert #1, `go/request-forgery` ("Uncontrolled data used in network request", critical, `stream.go:220`).** The DoH worker built its request URL from the host and port the user typed. Reproduced locally with CodeQL 2.27.1 and the `go-code-scanning` suite on the v2 source (one finding, severity 9.1, at that line), and gone after the two changes above (zero findings in Go and JavaScript). That any signed-in user can aim the benchmark at any host is the purpose of the tool and is unchanged (it is why sign-in is limited to a group); what changed is that the target is validated and the request is built from the checked values.
+- The UI did not render on a network that cannot reach `cdn.jsdelivr.net` (listed as a known limitation below). The server and the REST API never needed it; the browser pages did.
+
+### Verified
+- Full release process: `gofmt -l`, `go vet`, `go build -buildvcs=false`, `go test -race -count=1` (cgo), `CGO_ENABLED=0` vet and `go test -count=1` (the fail-closed path), cross-compile for linux/amd64, arm64, arm, 386, riscv64, ppc64le, s390x, loong64 and mips, mipsle, mips64, mips64le, and the 32-bit (386) test binary run for real; all from the extracted archive as well as the working tree.
+- UDP engine before/after on the same machine (reflector alive before and after each run, 10 s, 2 workers, queue 64): original 337k and 313k q/s at 1.51 and 1.64 CPU µs per query, this release 321k and 327k q/s at 1.61 and 1.56 µs, all 100% success; no regression (the UDP path is untouched).
+- DoH live against a separate stdlib TLS/HTTP/2 responder, original and this release, 4 s each: POST/HTTP 1.1 by IP, POST/HTTP 1.1 by name, GET/HTTP 2 by name, and a full `https://` URL with POST/HTTP 2; 100% success in all eight runs, throughput within run-to-run noise (9-16k q/s on one shared vCPU), and the responder saw the same Host, SNI, protocol and method for both builds (the typed name for a hostname, no SNI for an IP).
+- New tests: malformed and well-formed targets (`TestCheckTarget`), and the Host header and TLS server name for HTTP/1.1 and HTTP/2 (`TestDoHKeepsTypedNameForHostAndSNI`, shown to fail when `req.Host` or `ServerName` is removed).
+- gofmt, vet, `go test`, and `ui.js` against the real daemon with PAM login in Chromium, light and dark, with every request outside the server refused (none attempted).
+- Before/after screenshots of every screen (login with and without error, benchmark, results, comparison charts, schedules, schedule dialog, README and License in the app and standalone) in both colour schemes; charts also with errors, a run without a result, hover, a live theme change and closing.
+- Mutation checks: adding a CDN link or an undefined icon fails the new tests.
+
+### Not verified
+- GitHub's own CodeQL run on `main` (its version and configuration may differ from the local 2.27.1 bundle and the `go-code-scanning` suite used here). The alert should close by itself once this release is pushed and scanned.
+- The installer and uninstaller: `install.sh`, `uninstall.sh` and the three `contrib/` files they install are byte-identical to v2 (only a new `contrib/icons/` tool and `contrib/uitest/ui.js` changed), so their dry-run, upgrade, rollback and login-group suite was not re-run for this release.
+- PAM on any architecture but native amd64 (the cross-compiles use the fail-closed stub); runtime beyond amd64 and 386.
+- Firefox and Safari. Chromium only. The new code uses CSS masks, `<dialog>` and `ResizeObserver`, which current versions of both support.
+- The icons are drawn for this project, so they are close to, but not pixel-identical with, the ones they replace.
+
 ## [v2] - 2026-10-04 — Login group; light and dark themes follow the system; lighter dark theme
 
 ### Added

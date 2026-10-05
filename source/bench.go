@@ -130,7 +130,13 @@ func parseParams(args map[string]string, cpu int) (benchParams, []string, error)
 	default:
 		return p, nil, fmt.Errorf("unknown protocol %q", p.protocol)
 	}
-	p.host, p.port, p.path = parseServer(p.server, p.protocol)
+	host, portText, path := parseServer(p.server, p.protocol)
+	port, err := checkTarget(p.server, p.protocol, host, portText, path)
+	if err != nil {
+		return p, nil, err
+	}
+	// The port is stored from the checked number, never from the typed text.
+	p.host, p.port, p.path = host, strconv.Itoa(port), path
 
 	if n, ok := argInt(args, "concurrency"); ok {
 		p.workers = clampInt(n, 1, maxWorkers)
@@ -212,6 +218,40 @@ func parseServer(server, protocol string) (host, port, path string) {
 	}
 	host, port = splitHostPort(s, def)
 	return host, port, path
+}
+
+// checkTarget refuses a server string that cannot be a host, a port and a path,
+// and returns the port as a number. The target is whatever the signed-in user
+// typed, so it is checked before it is used for anything: the port must be a
+// number from 1 to 65535, the host must be an IP address or a name free of
+// characters that have a meaning in a URL or a header, and the DoH path must be
+// an absolute path without control characters.
+func checkTarget(server, protocol, host, portText, path string) (int, error) {
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("invalid port %q", portText)
+	}
+	if host == "" || len(host) > 253 {
+		return 0, fmt.Errorf("invalid server %q", server)
+	}
+	if net.ParseIP(host) == nil {
+		for _, r := range host {
+			if r <= ' ' || r == 0x7f || strings.ContainsRune("/\\?#@:[]%\"<>`", r) {
+				return 0, fmt.Errorf("invalid server %q", server)
+			}
+		}
+	}
+	if protocol == "doh" {
+		if !strings.HasPrefix(path, "/") {
+			return 0, fmt.Errorf("invalid path %q", path)
+		}
+		for _, r := range path {
+			if r < ' ' || r == 0x7f {
+				return 0, fmt.Errorf("invalid path %q", path)
+			}
+		}
+	}
+	return port, nil
 }
 
 func splitHostPort(s, def string) (string, string) {

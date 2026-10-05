@@ -401,6 +401,8 @@ type dohSeen struct {
 	meths  map[string]int
 	ct     string
 	accept string
+	host   string // Host header of the last request
+	sni    string // TLS server name of the last request
 }
 
 func startDoH(t *testing.T, status int) (*httptest.Server, *dohSeen) {
@@ -417,6 +419,10 @@ func startDoH(t *testing.T, status int) (*httptest.Server, *dohSeen) {
 		seen.protos[r.Proto]++
 		seen.meths[r.Method]++
 		seen.ct, seen.accept = r.Header.Get("Content-Type"), r.Header.Get("Accept")
+		seen.host = r.Host
+		if r.TLS != nil {
+			seen.sni = r.TLS.ServerName
+		}
 		seen.mu.Unlock()
 		if err != nil || len(q) < 12 {
 			http.Error(w, "bad query", http.StatusBadRequest)
@@ -587,5 +593,66 @@ func TestDurationRunAgainstDeadServerReportsFailures(t *testing.T) {
 				t.Fatalf("dead server reported as success:\n%s", r.text())
 			}
 		})
+	}
+}
+
+// The request goes to the address that was resolved, but the name the user typed
+// is still what the server sees as the Host header and the TLS server name.
+func TestDoHKeepsTypedNameForHostAndSNI(t *testing.T) {
+	srv, seen := startDoH(t, 200)
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "https://"))
+	for _, ver := range []string{"1.1", "2"} {
+		t.Run("http"+ver, func(t *testing.T) {
+			r := runJobArgs(t, testApp(t), args("server", "localhost:"+port, "protocol", "doh", "concurrency", "1",
+				"count", "3", "doh_protocol", ver))
+			if r.sent != 3 || r.errs != 0 {
+				t.Fatalf("sent=%d errs=%d\n%s", r.sent, r.errs, r.text())
+			}
+			seen.mu.Lock()
+			defer seen.mu.Unlock()
+			if seen.host != "localhost:"+port || seen.sni != "localhost" {
+				t.Fatalf("server saw Host %q and SNI %q, want %q and %q", seen.host, seen.sni, "localhost:"+port, "localhost")
+			}
+		})
+	}
+}
+
+func TestCheckTarget(t *testing.T) {
+	good := []struct{ in, proto string }{
+		{"8.8.8.8", "udp"}, {"8.8.8.8:5353", "udp"}, {"dns.example", "dot"}, {"dns_1.example.", "tcp"},
+		{"2001:db8::1", "udp"}, {"[2001:db8::1]:5353", "udp"}, {"https://dns.example:8443/dns-query", "doh"},
+		{"https://dns.example/a/b%20c", "doh"}, {"127.0.0.1:65535", "udp"},
+	}
+	for _, c := range good {
+		if _, _, err := parseParams(args("server", c.in, "protocol", c.proto), 1); err != nil {
+			t.Errorf("%s/%s refused: %v", c.in, c.proto, err)
+		}
+	}
+	bad := []struct{ in, proto string }{
+		{"[::1]:99999", "udp"},              // port out of range
+		{"[::1]:0", "udp"},                  // port zero
+		{"[::1]:abc", "udp"},                // port not a number
+		{"user@evil.example", "doh"},        // userinfo
+		{"evil.example:80:90", "udp"},       // two colons that are not an IPv6 address
+		{"a b.example", "udp"},              // whitespace
+		{"evil.example%0d%0aX: y", "doh"},   // escape sequence
+		{"https://dns.example/\x01", "doh"}, // control character in the path
+		{"https://dns.example/a\nb", "doh"}, // newline in the path
+		{"https://", "doh"},                 // no host
+		{"dns.example\\evil", "udp"},        // backslash
+	}
+	for _, c := range bad {
+		if _, _, err := parseParams(args("server", c.in, "protocol", c.proto), 1); err == nil {
+			t.Errorf("%q/%s was accepted", c.in, c.proto)
+		}
+	}
+	// The port is rewritten from the checked number.
+	p, _, err := parseParams(args("server", "dns.example:0053", "protocol", "udp"), 1)
+	if err != nil || p.port != "53" {
+		t.Errorf("port = %q, err = %v, want 53", p.port, err)
+	}
+	// A path is only examined for DoH.
+	if _, _, err := parseParams(args("server", "dns.example/\x01", "protocol", "udp"), 1); err != nil {
+		t.Errorf("udp server with a path-like suffix refused: %v", err)
 	}
 }

@@ -169,12 +169,14 @@ func (c *runCtx) dohWorker(id int) {
 
 	dialer := net.Dialer{Timeout: queryTimeout}
 	tr := &http.Transport{
-		// Always connect to the address resolved once at job start, while the
-		// URL host (and so SNI / certificate name) stays what the user typed.
+		// Always connect to the address resolved once at job start. The request
+		// URL names that same address; the name the user typed travels only in
+		// the Host header and as the TLS server name (SNI and certificate name),
+		// so it is never what the client connects to.
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return dialer.DialContext(ctx, "tcp", c.hostport)
 		},
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: p.insecure, MinVersion: tls.VersionTLS12},
+		TLSClientConfig:     &tls.Config{ServerName: p.host, InsecureSkipVerify: p.insecure, MinVersion: tls.VersionTLS12},
 		TLSHandshakeTimeout: queryTimeout,
 		MaxIdleConns:        1,
 		MaxIdleConnsPerHost: 1,
@@ -189,14 +191,16 @@ func (c *runCtx) dohWorker(id int) {
 	defer tr.CloseIdleConnections()
 	client := &http.Client{Transport: tr, Timeout: queryTimeout}
 
-	host := p.host
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
+	// What the user typed, as a Host header value.
+	hostHeader := p.host
+	if strings.Contains(hostHeader, ":") {
+		hostHeader = "[" + hostHeader + "]"
 	}
 	if p.port != "443" {
-		host += ":" + p.port
+		hostHeader += ":" + p.port
 	}
-	base := url.URL{Scheme: "https", Host: host, Path: p.path}
+	// Where the request goes: the resolved address and the checked port.
+	base := url.URL{Scheme: "https", Host: c.hostport, Path: p.path}
 
 	// RFC 8484 recommends ID 0 for DoH, which keeps GET requests cacheable.
 	var one func(t []byte) (int, string)
@@ -216,6 +220,7 @@ func (c *runCtx) dohWorker(id int) {
 		if err != nil {
 			return rcError, err.Error()
 		}
+		req.Host = hostHeader
 		req.Header.Set("Accept", "application/dns-message")
 		resp, err := client.Do(req)
 		if err != nil {
