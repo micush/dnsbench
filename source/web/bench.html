@@ -193,6 +193,29 @@
     .ctx-item[aria-disabled="true"]{opacity:.4;cursor:default}
     .ctx-item[aria-disabled="true"]:hover{background:none}
     .ctx-sep{height:1px;margin:4px 6px;background:var(--border)}
+    /* ── Updates page ── */
+    .run-btn:disabled{opacity:.45;cursor:not-allowed}
+    .run-btn:disabled:hover{background:var(--accent)}
+    .upd-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
+    .upd-stat{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px}
+    .upd-stat .k{font-size:0.884rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+    .upd-stat .v{font-size:1.4rem;font-weight:550;color:var(--text);margin-top:2px}
+    .upd-stat .v.small{font-size:1.1rem;padding-top:4px}
+    .upd-notice{background:var(--bg2);border:1px solid var(--border);border-left:4px solid var(--muted);border-radius:8px;padding:10px 14px;margin-bottom:10px;color:var(--text);font-size:1.01rem}
+    .upd-notice.warn{border-left-color:var(--term-warn)}
+    .upd-notice.bad{border-left-color:var(--term-err)}
+    .upd-notice.ok{border-left-color:var(--term-ok)}
+    .upd-notice pre{margin:8px 0 0;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:0.91rem;color:var(--term-fg);background:var(--term-bg);border-radius:6px;padding:8px 10px}
+    .upd-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;overflow:hidden}
+    .upd-card header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border)}
+    .upd-card h2{font-size:1.1rem;margin:0;font-weight:600;color:var(--text);flex:1}
+    .upd-card .body{padding:12px 14px}
+    .upd-table{width:100%;border-collapse:collapse;font-size:0.975rem}
+    .upd-table th{text-align:left;font-weight:550;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--border);font-size:0.884rem;text-transform:uppercase;letter-spacing:.04em}
+    .upd-table td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top;color:var(--text)}
+    .upd-table td.wrap{white-space:pre-wrap;word-break:break-word}
+    .upd-pill{font-size:0.884rem;padding:1px 8px;border-radius:10px;background:var(--bg3);color:var(--muted)}
+    .upd-pill.ok{color:var(--term-ok)}.upd-pill.bad{color:var(--term-err)}
     /* ── misc ── */
     .badge-pill{font-size:0.884rem;padding:2px 7px;border-radius:10px;font-weight:500}
     .hint{font-size:0.936rem;color:var(--muted);margin-top:4px}
@@ -214,6 +237,9 @@
     </a>
     <a href="#" class="nav-link" onclick="showPage('schedules',this);return false">
       <i class="bi bi-calendar-check"></i> Schedules
+    </a>
+    <a href="#" class="nav-link" onclick="showPage('updates',this);return false">
+      <i class="bi bi-upload"></i> Updates
     </a>
     <a href="#" class="nav-link sb-bottom" onclick="showPage('readme',this);return false">
       <i class="bi bi-file-text"></i> ReadMe
@@ -424,6 +450,41 @@
       <span style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--term-err)"></span>p95 &gt;50ms · errors &gt;1%</span>
     </div>
     <div id="historyList"><p class="text-muted">No runs yet.</p></div>
+  </div>
+
+  <!-- Updates -->
+  <div id="page-updates" class="page">
+    <div style="margin-bottom:20px">
+      <h1 style="font-size:1.859rem;font-weight:600;color:var(--text);margin:0 0 2px"><i class="bi bi-upload text-primary me-2"></i>Updates</h1>
+      <p style="font-size:1.014rem;color:var(--muted);margin:0">Update dnsbench by uploading a release archive. It is built on this server and installed in place.</p>
+    </div>
+    <div id="updNotices"></div>
+    <div id="updStats" class="upd-stats"></div>
+    <div id="updMsg" aria-live="polite"></div>
+
+    <div class="upd-card">
+      <header><h2>1. Upload a release</h2>
+        <button id="updUploadBtn" class="run-btn" style="width:auto;padding:8px 18px;font-size:1.014rem" onclick="updUpload()">Upload</button>
+      </header>
+      <div class="body">
+        <p class="hint" style="margin:0 0 8px">Choose the <code>dnsbench_vN.tgz</code> (or .zip) archive of a newer release. It is checked and staged on this server; nothing is installed yet.</p>
+        <input id="updFile" type="file" accept=".tgz,.tar.gz,.zip,application/gzip,application/zip" aria-label="Release archive" style="color:var(--text)">
+      </div>
+    </div>
+
+    <div class="upd-card">
+      <header><h2>2. Install it</h2>
+        <button id="updApplyBtn" class="run-btn" style="width:auto;padding:8px 18px;font-size:1.014rem" onclick="updApply(false)">Update now</button>
+      </header>
+      <div class="body">
+        <p id="updApplyHint" class="hint" style="margin:0">Upload a newer release first.</p>
+      </div>
+    </div>
+
+    <div class="upd-card">
+      <header><h2>History</h2><span id="updHistCount" class="hint" style="margin:0"></span></header>
+      <div id="updHistory" class="body"></div>
+    </div>
   </div>
 
   <!-- Schedules -->
@@ -1005,6 +1066,7 @@ function showPage(name,link){
   document.getElementById('page-'+name).classList.add('active');
   if(link) link.classList.add('active');
   if(name!=='history') clearHighlight();
+  if(name==='updates') startUpdatesPolling(); else stopUpdatesPolling();
   closeSchedMenu(false);
   if(name==='schedules') loadSchedules();
   if(name==='history') { syncSchedulerHistory().then(renderHistory); }
@@ -1941,6 +2003,147 @@ async function syncSchedulerHistory() {
       saveHistory(runHistory);
     }
   } catch(e) {}
+}
+
+// ── Updates ───────────────────────────────────────────────────────────────────
+let _updTimer=null, _updView=null, _updGone=false, _updExpectRestart=false;
+
+function startUpdatesPolling(){
+  stopUpdatesPolling();
+  loadUpdates();
+  _updTimer=setInterval(loadUpdates,2000);
+}
+function stopUpdatesPolling(){ if(_updTimer){ clearInterval(_updTimer); _updTimer=null; } }
+
+function updSay(kind,text){
+  const el=document.getElementById('updMsg');
+  el.textContent='';
+  if(!text) return;
+  const d=document.createElement('div');
+  d.className='upd-notice '+kind;
+  d.textContent=text;
+  el.appendChild(d);
+}
+
+async function loadUpdates(){
+  if(_updGone) return;
+  let r;
+  try{ r=await fetch('/api/update'); }
+  catch(e){
+    // the server is down: expected while it restarts into a new version, otherwise just say so
+    if(_updExpectRestart || (_updView && /^installed/.test(_updView.phase||''))) updServerGone('The server is restarting into the new version…');
+    else updSay('warn','Cannot reach the server; retrying…');
+    return;
+  }
+  if(r.status===401){ updServerGone('The server restarted (or your session ended): you need to sign in again.'); return; }
+  let d; try{ d=await r.json(); }catch(e){ return; }
+  if(!d.ok){ updSay('bad',d.error||'Could not read the update status.'); return; }
+  _updView=d.data;
+  renderUpdates(d.data);
+}
+
+// The daemon restarts into the new binary and forgets every session, so the page cannot carry
+// on: wait for the server to answer again, then go to the sign-in page.
+function updServerGone(text){
+  _updGone=true; stopUpdatesPolling();
+  updSay('warn',text+' This page opens the sign-in page as soon as the server answers.');
+  const probe=async()=>{
+    try{ const r=await fetch('/login',{cache:'no-store'}); if(r.ok){ location.assign('/login'); return; } }catch(e){}
+    setTimeout(probe,1500);
+  };
+  setTimeout(probe,1500);
+}
+
+function updNotice(kind,text,detail){
+  const d=document.createElement('div');
+  d.className='upd-notice '+kind;
+  const t=document.createElement('div'); t.textContent=text; d.appendChild(t);
+  if(detail){ const pre=document.createElement('pre'); pre.textContent=detail; d.appendChild(pre); }
+  return d;
+}
+
+function updStat(k,v,small){
+  const d=document.createElement('div'); d.className='upd-stat';
+  const a=document.createElement('div'); a.className='k'; a.textContent=k;
+  const b=document.createElement('div'); b.className='v'+(small?' small':''); b.textContent=v;
+  d.append(a,b);
+  return d;
+}
+
+function renderUpdates(v){
+  const notices=document.getElementById('updNotices'); notices.textContent='';
+  if(v.notice) notices.appendChild(updNotice('bad',v.notice));
+  (v.problems||[]).forEach(p=>notices.appendChild(updNotice('warn',p)));
+  if(v.last_failed) notices.appendChild(updNotice('bad','The last attempt to install v'+v.last_failed.to+' failed ('+when(v.last_failed.at)+'). Nothing was changed.',v.last_failed.detail));
+
+  const state=v.busy ? (v.waiting||v.phase||'working…') : v.newer ? 'update available' : 'up to date';
+  const stats=document.getElementById('updStats'); stats.textContent='';
+  stats.append(updStat('Running','v'+v.running),updStat('Staged source',v.source_version?'v'+v.source_version:'none'),updStat('This server',state,true));
+
+  const blocked=!v.enabled || (v.problems||[]).length>0;
+  document.getElementById('updUploadBtn').disabled=!v.enabled || v.busy;
+  const apply=document.getElementById('updApplyBtn');
+  apply.disabled=blocked || !v.newer || v.busy;
+  apply.textContent=v.newer ? 'Update to v'+v.source_version : 'Update now';
+  document.getElementById('updApplyHint').textContent = !v.enabled ? 'Updates from the web UI are switched off on this server.'
+    : v.busy ? 'An update is in progress.'
+    : !v.source_version ? 'Upload a newer release first.'
+    : !v.newer ? 'The staged release is not newer than the running one.'
+    : blocked ? 'Fix the problems above first.'
+    : 'Builds v'+v.source_version+' on this server (a minute or two), then restarts dnsbench into it. A benchmark that is running is stopped, and everyone has to sign in again. If the new version fails to stay up it is rolled back automatically.';
+
+  document.getElementById('updHistCount').textContent=v.history_total>v.history.length ? 'newest '+v.history.length+' of '+v.history_total : '';
+  const box=document.getElementById('updHistory'); box.textContent='';
+  if(!v.history.length){ const p=document.createElement('p'); p.className='hint'; p.style.margin='0'; p.textContent='No update activity yet.'; box.appendChild(p); return; }
+  const tbl=document.createElement('table'); tbl.className='upd-table';
+  const head=tbl.createTHead().insertRow();
+  ['When','Event','Version','Detail'].forEach(h=>{ const th=document.createElement('th'); th.textContent=h; head.appendChild(th); });
+  const body=tbl.createTBody();
+  v.history.forEach(e=>{
+    const tr=body.insertRow();
+    tr.insertCell().textContent=when(e.at);
+    const pill=document.createElement('span'); pill.className='upd-pill'+(e.kind==='failed'||e.kind==='rolled-back'?' bad':e.kind==='applied'?' ok':''); pill.textContent=e.kind;
+    tr.insertCell().appendChild(pill);
+    tr.insertCell().textContent=(e.from?'v'+e.from+' → ':'')+(e.to?'v'+e.to:'');
+    const dc=tr.insertCell(); dc.className='wrap'; dc.textContent=[e.detail||'', e.by?' (by '+e.by+')':''].join('');
+  });
+  box.appendChild(tbl);
+}
+
+function when(iso){ try{ return new Date(iso).toLocaleString(); }catch(e){ return iso||''; } }
+
+async function updUpload(){
+  const file=document.getElementById('updFile').files[0];
+  if(!file){ updSay('warn','Choose a release archive first.'); return; }
+  const btn=document.getElementById('updUploadBtn'); btn.disabled=true;
+  updSay('ok','Uploading and checking '+file.name+'…');
+  try{
+    const r=await fetch('/api/update/upload',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});
+    if(r.status===401){ updServerGone('Your session ended: you need to sign in again.'); return; }
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok) updSay('bad',d.error||('Upload failed ('+r.status+').'));
+    else{ document.getElementById('updFile').value=''; updSay('ok','Release v'+d.data.version+' is staged. Install it with the button below.'); }
+  }catch(e){ updSay('bad','Upload failed: '+e.message); }
+  finally{ btn.disabled=false; loadUpdates(); }
+}
+
+async function updApply(force){
+  const v=_updView; if(!v) return;
+  if(!force && !confirm('Build v'+v.source_version+' on this server and restart into it?\n\nThe build takes a minute or two. Then dnsbench restarts: a benchmark that is running is stopped and everyone has to sign in again. If the new version fails to stay up it is rolled back automatically.')) return;
+  document.getElementById('updApplyBtn').disabled=true;
+  try{
+    const r=await fetch('/api/update/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(force?{force:true}:{})});
+    if(r.status===401){ updServerGone('Your session ended: you need to sign in again.'); return; }
+    const d=await r.json().catch(()=>({}));
+    if(r.status===409 && d.needs_confirm){
+      if(confirm(String(d.error||'').replace(/^not safe to update this server now: /,'')+'.\n\nUpdate anyway?')) return updApply(true);
+      loadUpdates(); return;
+    }
+    if(!r.ok||!d.ok){ updSay('bad',d.error||('Could not start the update ('+r.status+').')); loadUpdates(); return; }
+    _updExpectRestart=true;
+    updSay('ok','Building v'+d.data.target+'. This server restarts when it is done; this page then opens the sign-in page.');
+    loadUpdates();
+  }catch(e){ updSay('bad','Could not start the update: '+e.message); loadUpdates(); }
 }
 
 // ── Doc pages (ReadMe / License) ──────────────────────────────────────────────

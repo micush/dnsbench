@@ -20,6 +20,9 @@ StateDirectory=dnsbench
 StateDirectoryMode=0700
 NoNewPrivileges=yes
 ProtectSystem=strict
+# The Updates page replaces the binary and the docs next to it; the rest of the system stays
+# read-only. The leading "-" keeps the unit starting if the directory is ever absent.
+ReadWritePaths=-/opt/dnsbench
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes

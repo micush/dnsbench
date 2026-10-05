@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -30,12 +31,42 @@ func main() {
 		return
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "dnsbench:", err)
+		// A release that rejects the existing configuration is the commonest way for a new
+		// version to fail to start, and it fails here, before run(): count it, or the boot guard
+		// would never see it and the service would crash-loop for good.
+		guardAtStart(envOr(os.Getenv, "STATE_DIR", "/var/lib/dnsbench"), selfPath(), reexec)
 		os.Exit(2)
 	}
+	guardAtStart(cfg.StateDir, selfPath(), reexec)
 	if err := run(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, "dnsbench:", err)
 		os.Exit(1)
 	}
+}
+
+// selfPath is the path of the running binary, taken before any update can replace it.
+func selfPath() string {
+	exe, _ := os.Executable()
+	return strings.TrimSuffix(exe, " (deleted)")
+}
+
+func reexec(exe string) error { return syscall.Exec(exe, os.Args, os.Environ()) }
+
+// guardAtStart counts this start against an update that has not yet proved itself, and, once
+// that update has failed to stay up too many times, restores the previous binary and starts it.
+// It runs first thing in main(), ahead of everything that can fail, so that every way of failing
+// to start is counted. It reports whether it restored the previous version (the re-exec normally
+// does not return).
+func guardAtStart(stateDir, exe string, restart func(string) error) bool {
+	if !newUpdater(stateDir, false).GuardOnStart() {
+		return false
+	}
+	log.Printf("update: restarting into the restored previous version")
+	if err := restart(exe); err != nil {
+		fmt.Fprintln(os.Stderr, "dnsbench: cannot start the restored previous version:", err)
+		os.Exit(1)
+	}
+	return true
 }
 
 func run(cfg *Config) error {
@@ -48,6 +79,32 @@ func run(cfg *Config) error {
 	}
 
 	app := newApp(cfg)
+
+	exe := selfPath()
+	app.updater.exePath = func() (string, error) { return exe, nil }
+	if n := app.updater.RolledBackNotice(); n != "" {
+		log.Printf("update: %s", n)
+	}
+	restart := make(chan struct{}, 1)
+	app.updater.restartFn = func() {
+		select {
+		case restart <- struct{}{}:
+		default:
+		}
+	}
+	stopped := make(chan struct{})
+	defer close(stopped)
+	go func() {
+		select {
+		case <-stopped:
+		case <-time.After(bootConfirmAfter):
+			app.updater.GuardConfirm()
+		}
+	}()
+	if !cfg.AllowUpdates {
+		log.Printf("updates from the web UI are switched off (ALLOW_UPDATES=false)")
+	}
+
 	app.schedules.load()
 	log.Printf("pam: authenticating against service %q", app.pamSvc)
 	if _, err := user.LookupGroup(cfg.LoginGroup); err != nil {
@@ -90,17 +147,25 @@ func run(cfg *Config) error {
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	reexec := false
 	select {
 	case err := <-serveErr:
 		return err
 	case s := <-sig:
 		log.Printf("%v received, shutting down", s)
+	case <-restart:
+		log.Printf("restarting into the updated binary")
+		reexec = true
 	}
 	app.killAll()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		srv.Close() // streaming clients can hold Shutdown open
+	}
+	if reexec {
+		log.Printf("re-executing %s", exe)
+		return syscall.Exec(exe, os.Args, os.Environ())
 	}
 	return nil
 }

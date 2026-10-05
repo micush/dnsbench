@@ -16,6 +16,9 @@
 // Runs the whole flow in light and dark colour schemes, including the theme behaviour.
 const { chromium } = require(process.env.PW);
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
 const BASE = process.env.BASE;
 const USER = process.env.UI_USER || 'benchuser';
 const PASS = process.env.UI_PASS || 'Sup3rSecret!';
@@ -68,7 +71,7 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     const sprotos = await page.$$eval('#schedProtocol option', os => os.map(o => o.value));
     check('schedule protocols have no doq', JSON.stringify(sprotos) === '["udp","tcp","dot","doh"]', JSON.stringify(sprotos));
     const nav = await page.$$eval('.sidebar .nav-link', as => as.map(a => a.textContent.trim()));
-    check('sidebar has no Server Info', JSON.stringify(nav) === '["Benchmark","Results","Schedules","ReadMe","License"]', JSON.stringify(nav));
+    check('sidebar has no Server Info', JSON.stringify(nav) === '["Benchmark","Results","Schedules","Updates","ReadMe","License"]', JSON.stringify(nav));
     check('sidebar shows the signed-in user', (await page.textContent('.sidebar')).includes(USER));
     const ta = await page.inputValue('#queryDomains');
     check('default query domains', ta === 'google.com\ncloudflare.com\ngithub.com', JSON.stringify(ta));
@@ -510,6 +513,68 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     await page.evaluate(() => closeCompare());
     check('charts: closing removes the tooltip', (await page.locator('[role=tooltip]').count()) === 0);
 
+
+    // Updates page: upload a release, see it staged, and the confirmation before installing.
+    // (The install itself restarts the daemon, so it is covered by update.js instead.)
+    await page.evaluate(() => showPage('updates', document.querySelector('.nav-link[onclick*="updates"]')));
+    await page.waitForSelector('#updStats .upd-stat');
+    const api = await page.evaluate(async () => (await (await fetch('/api/update')).json()).data);
+    const running = api.running;
+    check('updates: the page shows the running version', (await page.textContent('#updStats')).includes('v' + running), await page.textContent('#updStats'));
+    check('updates: the Upload and Update buttons exist', (await page.locator('#updUploadBtn').count()) === 1 && (await page.locator('#updApplyBtn').count()) === 1);
+    // a file that is not a release is refused with the reason, and nothing changes
+    const stagedBefore = api.source_version;
+    await page.setInputFiles('#updFile', { name: 'notes.tgz', mimeType: 'application/gzip', buffer: Buffer.from('this is not an archive') });
+    await page.click('#updUploadBtn');
+    await page.waitForFunction(() => document.getElementById('updMsg').textContent.includes('rejected'), null, { timeout: 10000 });
+    check('updates: an invalid archive is refused with a reason', (await page.textContent('#updMsg')).includes('not a .tgz'), await page.textContent('#updMsg'));
+    check('updates: a refused upload stages nothing', (await page.evaluate(async () => (await (await fetch('/api/update')).json()).data.source_version)) === stagedBefore);
+    // a release that is not newer is refused
+    const mkRelease = (ver) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnsbench-rel-'));
+      const root = path.join(dir, 'dnsbench');
+      fs.mkdirSync(path.join(root, 'source'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'README.md'), '# test release\n');
+      fs.writeFileSync(path.join(root, 'source', 'go.mod'), 'module dnsbench\n\ngo 1.22\n');
+      fs.writeFileSync(path.join(root, 'source', 'main.go'), 'package main\n\nfunc main() {}\n');
+      fs.writeFileSync(path.join(root, 'source', 'VERSION'), ver + '\n');
+      const out = path.join(dir, 'dnsbench_v' + ver + '.tgz');
+      execFileSync('tar', ['czf', out, '-C', dir, 'dnsbench']);
+      return out;
+    };
+    await page.setInputFiles('#updFile', mkRelease(running));
+    await page.click('#updUploadBtn');
+    await page.waitForFunction(() => document.getElementById('updMsg').textContent.includes('not newer'), null, { timeout: 10000 });
+    check('updates: a release that is not newer is refused', true);
+    // a newer one is staged
+    const newer = String(Number(running) + 1);
+    await page.setInputFiles('#updFile', mkRelease(newer));
+    await page.click('#updUploadBtn');
+    await page.waitForFunction(() => document.getElementById('updMsg').textContent.includes('is staged'), null, { timeout: 10000 });
+    await page.waitForFunction(v => document.getElementById('updStats').textContent.includes('v' + v), newer, { timeout: 10000 });
+    check('updates: the staged version is shown', /Staged source\s*v/.test(await page.textContent('#updStats')) && (await page.textContent('#updStats')).includes('v' + newer), await page.textContent('#updStats'));
+    const afterApi = await page.evaluate(async () => (await (await fetch('/api/update')).json()).data);
+    const canApply = afterApi.enabled && afterApi.problems.length === 0;
+    check('updates: the Update button is enabled exactly when nothing blocks an update (' + (canApply ? 'nothing does' : afterApi.problems.join(' | ')) + ')',
+      (await page.isDisabled('#updApplyBtn')) === !canApply, JSON.stringify(afterApi.problems));
+    if (canApply) {
+      check('updates: the button names the version', (await page.textContent('#updApplyBtn')).includes('v' + newer));
+      // the confirmation says what will happen; declining it sends nothing
+      let applyRequests = 0;
+      page.on('request', r => { if (r.url().endsWith('/api/update/apply')) applyRequests++; });
+      await page.evaluate(() => { window.__confirms = []; window.__origConfirm = window.confirm; window.confirm = m => { window.__confirms.push(m); return false; }; });
+      await page.click('#updApplyBtn');
+      const asked = await page.evaluate(() => { const c = window.__confirms.slice(); window.confirm = window.__origConfirm; return c; });
+      check('updates: Update now asks first, and says it restarts, stops benchmarks and signs everyone out',
+        asked.length === 1 && /restart/i.test(asked[0]) && /benchmark/i.test(asked[0]) && /sign in/i.test(asked[0]) && /rolled back/i.test(asked[0]), JSON.stringify(asked));
+      check('updates: declining the confirmation sends no request', applyRequests === 0);
+    }
+    const histText = await page.textContent('#updHistory');
+    check('updates: the history lists the upload with who did it', histText.includes('uploaded') && histText.includes('v' + newer) && histText.includes('(by ' + USER + ')'), histText.replace(/\s+/g, ' ').slice(0, 300));
+    // the polling stops when you leave the page
+    await page.evaluate(() => showPage('bench', document.querySelector('.nav-link[onclick*="bench"]')));
+    check('updates: polling stops on leaving the page', await page.evaluate(() => _updTimer === null));
+
     // Docs pages
     await page.evaluate(() => showPage('readme', document.querySelector('.nav-link[onclick*="readme"]')));
     await page.waitForFunction(() => document.getElementById('readmeContent').textContent.length > 200, null, { timeout: 10000 });
@@ -518,7 +583,14 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     await page.waitForFunction(() => document.getElementById('licenseContent').textContent.includes('GNU GENERAL PUBLIC LICENSE'), null, { timeout: 10000 });
     check('license page loads', true);
 
-    const real = errors.filter(e => !e.includes('401')); // the 401 is the deliberate wrong-password attempt
+    // the 401 is the deliberate wrong-password attempt; the two 422s are the deliberate refused uploads (exactly two)
+    let expected422 = 2;
+    const real = errors.filter(e => {
+      if (e.includes('401')) return false;
+      if (e.includes('422') && expected422 > 0) { expected422--; return false; }
+      return true;
+    });
+    check('updates: both refused uploads were answered 422 and nothing else was', expected422 === 0);
     check('no JS or resource errors in the browser', real.length === 0, real.join(' | '));
     check('nothing was requested from outside the server', external.size === 0, [...external].join(' '));
     await ctx.close();

@@ -60,7 +60,7 @@ func TestConfigDefaultsEnvAndFlags(t *testing.T) {
 	var buf bytes.Buffer
 	c, err := loadConfig(nil, env(nil), &buf)
 	if err != nil || c.Port != 8453 || c.Host != "0.0.0.0" || c.StateDir != "/var/lib/dnsbench" ||
-		c.SchedulesFile != "/var/lib/dnsbench/schedules.json" || c.NoTLS || c.PAMService != "" || c.LoginGroup != "dnsbench" {
+		c.SchedulesFile != "/var/lib/dnsbench/schedules.json" || c.NoTLS || c.PAMService != "" || c.LoginGroup != "dnsbench" || !c.AllowUpdates {
 		t.Fatalf("defaults: %+v %v", c, err)
 	}
 	c, err = loadConfig(nil, env(map[string]string{"LISTEN_PORT": "9000", "LISTEN_HOST": "127.0.0.1", "STATE_DIR": "/s", "NO_TLS": "true", "PAM_SERVICE": "x", "LOGIN_GROUP": "netops"}), &buf)
@@ -79,15 +79,17 @@ func TestConfigRejectsBadInput(t *testing.T) {
 		args []string
 		env  map[string]string
 	}{
-		"port word":    {nil, map[string]string{"LISTEN_PORT": "http"}},
-		"port zero":    {[]string{"--port", "0"}, nil},
-		"port too big": {[]string{"--port", "70000"}, nil},
-		"cert only":    {[]string{"--tls-cert", "/c"}, nil},
-		"key only":     {nil, map[string]string{"TLS_KEY": "/k"}},
-		"stray arg":    {[]string{"extra"}, nil},
-		"unknown flag": {[]string{"--tdns-api", "x"}, nil},
-		"old pfx flag": {[]string{"--pfx", "x"}, nil},
-		"old secret":   {[]string{"--secret-key", "x"}, nil},
+		"port word":     {nil, map[string]string{"LISTEN_PORT": "http"}},
+		"port zero":     {[]string{"--port", "0"}, nil},
+		"port too big":  {[]string{"--port", "70000"}, nil},
+		"cert only":     {[]string{"--tls-cert", "/c"}, nil},
+		"key only":      {nil, map[string]string{"TLS_KEY": "/k"}},
+		"stray arg":     {[]string{"extra"}, nil},
+		"unknown flag":  {[]string{"--tdns-api", "x"}, nil},
+		"old pfx flag":  {[]string{"--pfx", "x"}, nil},
+		"old secret":    {[]string{"--secret-key", "x"}, nil},
+		"updates typo":  {nil, map[string]string{"ALLOW_UPDATES": "flase"}},
+		"updates maybe": {[]string{"--allow-updates=maybe"}, nil},
 	} {
 		if _, err := loadConfig(tc.args, env(tc.env), &buf); err == nil {
 			t.Errorf("%s accepted", name)
@@ -263,4 +265,59 @@ func certSourceOf(t *testing.T, c *tls.Config) *certSource {
 		t.Fatal("no certSource recorded")
 	}
 	return lastCertSource
+}
+
+func TestAllowUpdatesSwitch(t *testing.T) {
+	var buf bytes.Buffer
+	for val, want := range map[string]bool{"": true, "true": true, "TRUE": true, "1": true, "yes": true, "on": true, " true ": true,
+		"false": false, "False": false, "0": false, "no": false, "off": false} {
+		c, err := loadConfig(nil, env(map[string]string{"ALLOW_UPDATES": val}), &buf)
+		if err != nil || c.AllowUpdates != want {
+			t.Errorf("ALLOW_UPDATES=%q: %v %v", val, c, err)
+		}
+	}
+	// a typo must stop the daemon, not leave root-level updates on by accident
+	for _, bad := range []string{"flase", "disabled", "2", "enable"} {
+		if _, err := loadConfig(nil, env(map[string]string{"ALLOW_UPDATES": bad}), &buf); err == nil || !strings.Contains(err.Error(), "ALLOW_UPDATES") {
+			t.Errorf("ALLOW_UPDATES=%q accepted (%v)", bad, err)
+		}
+	}
+	c, err := loadConfig([]string{"--allow-updates=false"}, env(map[string]string{"ALLOW_UPDATES": "true"}), &buf)
+	if err != nil || c.AllowUpdates {
+		t.Errorf("the flag must win over the environment: %v %v", c, err)
+	}
+	c, err = loadConfig([]string{"--allow-updates=true"}, env(map[string]string{"ALLOW_UPDATES": "false"}), &buf)
+	if err != nil || !c.AllowUpdates {
+		t.Errorf("the flag must win over the environment: %v %v", c, err)
+	}
+}
+
+// The Updates page replaces the binary in /opt/dnsbench. The shipped unit mounts the system
+// read-only, so it has to say that directory may be written; without this line every update
+// fails with a read-only file system.
+func TestShippedUnitLetsTheServiceReplaceItsOwnBinary(t *testing.T) {
+	b, err := os.ReadFile("../contrib/dnsbench.service")
+	if err != nil {
+		t.Skip("contrib/ is not next to source/ here")
+	}
+	unit := string(b)
+	if !strings.Contains(unit, "ProtectSystem=strict") {
+		t.Fatal("the unit no longer uses ProtectSystem=strict; revisit this test and the README")
+	}
+	if !strings.Contains(unit, "\nReadWritePaths=-/opt/dnsbench\n") {
+		t.Error("the unit does not allow writing /opt/dnsbench, so the Updates page could not install anything")
+	}
+	if !strings.Contains(unit, "ExecStart=/opt/dnsbench/dnsbench\n") {
+		t.Error("ExecStart moved: ReadWritePaths must cover the directory the binary runs from")
+	}
+	// every other path stays read-only: no blanket write access
+	for _, line := range strings.Split(unit, "\n") {
+		if strings.HasPrefix(line, "ReadWritePaths=") && line != "ReadWritePaths=-/opt/dnsbench" {
+			t.Errorf("unexpected writable path: %s", line)
+		}
+	}
+	conf, err := os.ReadFile("../contrib/dnsbench.conf")
+	if err == nil && !strings.Contains(string(conf), "\nALLOW_UPDATES=true\n") {
+		t.Error("the example config does not document ALLOW_UPDATES")
+	}
 }

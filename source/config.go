@@ -23,6 +23,7 @@ type Config struct {
 	SchedulesFile string
 	PAMService    string
 	LoginGroup    string
+	AllowUpdates  bool // the Updates page may upload, build and install a new release
 }
 
 func envOr(getenv func(string) string, key, def string) string {
@@ -50,6 +51,16 @@ func loadConfig(args []string, getenv func(string) string, out io.Writer) (*Conf
 	case "1", "true", "yes", "on":
 		noTLS = true
 	}
+	// Strict on purpose: this switch controls whether signed-in users can run their own code on the
+	// host, so a typo must stop the daemon rather than leave updates on (or off) by accident.
+	allowUpdates := true
+	switch v := strings.ToLower(strings.TrimSpace(getenv("ALLOW_UPDATES"))); v {
+	case "", "1", "true", "yes", "on":
+	case "0", "false", "no", "off":
+		allowUpdates = false
+	default:
+		return nil, fmt.Errorf("ALLOW_UPDATES %q is not true or false", v)
+	}
 	cfg := &Config{
 		Host:          envOr(getenv, "LISTEN_HOST", "0.0.0.0"),
 		Port:          port,
@@ -60,6 +71,7 @@ func loadConfig(args []string, getenv func(string) string, out io.Writer) (*Conf
 		SchedulesFile: envOr(getenv, "SCHEDULES_FILE", ""),
 		PAMService:    envOr(getenv, "PAM_SERVICE", ""),
 		LoginGroup:    envOr(getenv, "LOGIN_GROUP", defaultLoginGroup),
+		AllowUpdates:  allowUpdates,
 	}
 
 	fs := flag.NewFlagSet("dnsbench", flag.ContinueOnError)
@@ -73,6 +85,7 @@ func loadConfig(args []string, getenv func(string) string, out io.Writer) (*Conf
 	fs.StringVar(&cfg.SchedulesFile, "schedules-file", cfg.SchedulesFile, "where schedules are stored (SCHEDULES_FILE)")
 	fs.StringVar(&cfg.PAMService, "pam-service", cfg.PAMService, "PAM service name (PAM_SERVICE)")
 	fs.StringVar(&cfg.LoginGroup, "login-group", cfg.LoginGroup, "only members of this group may sign in (LOGIN_GROUP)")
+	fs.BoolVar(&cfg.AllowUpdates, "allow-updates", cfg.AllowUpdates, "let signed-in users upload and install a new release from the web UI (ALLOW_UPDATES)")
 	version := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return nil, err

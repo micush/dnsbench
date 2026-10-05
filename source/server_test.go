@@ -100,6 +100,7 @@ func TestProtectedRoutesRequireLogin(t *testing.T) {
 		{"GET", "/api/scheduler-history"}, {"POST", "/api/schedules/add"}, {"POST", "/api/schedules/update"},
 		{"POST", "/api/schedules/delete"}, {"POST", "/api/schedules/pause"}, {"POST", "/api/schedules/resume"},
 		{"POST", "/api/schedules/run"}, {"GET", "/api/readme-html"}, {"GET", "/api/license-html"},
+		{"GET", "/api/update"}, {"POST", "/api/update/upload"}, {"POST", "/api/update/apply"},
 	} {
 		resp, body := s.do(t, r.method, r.path, "{}", nil)
 		if resp.StatusCode != 401 {

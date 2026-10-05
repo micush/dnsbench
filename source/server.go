@@ -51,6 +51,7 @@ type App struct {
 	sessions  *sessionStore
 	throttle  *loginThrottle
 	schedules *scheduleStore
+	updater   *Updater
 	pamSvc    string
 
 	jobsMu   sync.Mutex
@@ -67,6 +68,7 @@ func newApp(cfg *Config) *App {
 		sessions:  newSessionStore(),
 		throttle:  newLoginThrottle(),
 		schedules: newScheduleStore(cfg.SchedulesFile),
+		updater:   newUpdater(cfg.StateDir, cfg.AllowUpdates),
 		pamSvc:    pamServiceName(cfg.PAMService),
 		jobs:      map[string]*Job{},
 	}
@@ -180,6 +182,9 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/schedules/pause", a.auth(a.apiSchedulesPause))
 	mux.HandleFunc("POST /api/schedules/resume", a.auth(a.apiSchedulesResume))
 	mux.HandleFunc("POST /api/schedules/run", a.auth(a.apiSchedulesRun))
+	mux.HandleFunc("GET /api/update", a.auth(a.apiUpdateStatus))
+	mux.HandleFunc("POST /api/update/upload", a.auth(a.apiUpdateUpload))
+	mux.HandleFunc("POST /api/update/apply", a.auth(a.apiUpdateApply))
 	mux.HandleFunc("GET /api/readme-html", a.auth(a.apiDoc("README.md")))
 	mux.HandleFunc("GET /api/license-html", a.auth(a.apiDoc("LICENSE.txt")))
 

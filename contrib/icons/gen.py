@@ -103,6 +103,7 @@ ICONS = {
                         "M4.6 6l2.3 2-2.3 2", "M8.4 10.3h3"),
     "terminal-fill": cutout("<rect x='1' y='2' width='14' height='12' rx='2'/>", "M4.4 5.9l2.3 2.1-2.3 2.1", "M8.3 10.3h3.2"),
     "trash": stroke("M2.5 4h11", "M6 4V2.4h4V4", "M3.8 4l.7 9.2a1 1 0 0 0 1 .9h5a1 1 0 0 0 1-.9l.7-9.2", "M6.6 6.6v5M9.4 6.6v5"),
+    "upload": stroke("M8 10.2V2.4", "M4.9 5.3L8 2.2l3.1 3.1", "M2.4 10v2.6a1.2 1.2 0 0 0 1.2 1.2h8.8a1.2 1.2 0 0 0 1.2-1.2V10"),
     "x-circle-fill": cutout(CIRCLE, CROSS),
     "x-lg": stroke("M3 3l10 10M13 3L3 13"),
 }

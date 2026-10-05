@@ -15,6 +15,7 @@ dns[bench] is one daemon that generates DNS load against any resolver and report
 - **Live output**: results stream line by line to their own Output tab on the Benchmark page while the run is going; when it finishes, the Results page opens with the new run highlighted
 - **Results history**: past runs with q/s, errors and p95 latency; select two or more to compare them as side-by-side pie charts that update as you tick or untick more (throughput and p95 latency, one slice per run); the best run in each pie, the highest throughput or the lowest p95, is pushed out, enlarged and outlined
 - **Schedules**: hourly, daily, weekly, monthly or one-off runs, in the server's local time zone; right-click a schedule to edit, duplicate, run, pause or delete it
+- **Update from the web UI**: upload a newer release archive on the Updates page; the server builds it, starts it once to check it works, installs it and restarts, and rolls back by itself if it fails to stay up
 - **Login with your system accounts** through PAM, limited to the members of one group
 - **Light and dark themes** that follow your system setting automatically
 - **REST API**: everything the UI does is available to curl
@@ -58,6 +59,7 @@ Edit `/etc/dnsbench/dnsbench.conf` (plain `KEY=value` lines), then `systemctl re
 | `SCHEDULES_FILE` | blank | Schedules file; blank means `STATE_DIR/schedules.json` |
 | `PAM_SERVICE` | blank | PAM service name; blank means `/etc/pam.d/dnsbench` |
 | `LOGIN_GROUP` | `dnsbench` | Only members of this group may sign in |
+| `ALLOW_UPDATES` | `true` | Let signed-in users update dnsbench from the Updates page; `false` switches that off (see the section Updating from the web UI). Anything but true or false stops the service from starting |
 
 Each setting also exists as a command-line flag (`--host`, `--port`, `--tls-cert`, `--tls-key`, `--no-tls`, `--state-dir`, `--schedules-file`, `--pam-service`, `--login-group`), and flags win over the config file. `dnsbench --help` lists them and `dnsbench --version` prints the version.
 
@@ -203,6 +205,22 @@ curl -sk -X POST "$BASE/api/job/$JOB/kill" -H "X-Session-Token: $TOK"
 
 `GET /api/job/{id}/stream` is the same output as server-sent events, which is what the browser uses. A late subscriber still receives every line from the start. `GET /api/jobs` lists the jobs the server still remembers.
 
+### Updates
+
+| Request | Purpose |
+|---|---|
+| `GET /api/update` | Running and staged versions, anything that blocks an update, and the history (newest 50) |
+| `POST /api/update/upload` | Body: the release archive itself (`.tgz` or `.zip`, at most 32 MB). Checks and stages it; returns its `version` |
+| `POST /api/update/apply` | Build the staged release and restart into it. Answers `409` with `needs_confirm` when a benchmark is running; repeat with `{"force": true}` to go ahead anyway |
+
+```bash
+curl -sk -H "X-Session-Token: $TOKEN" -H 'Content-Type: application/octet-stream' \
+     --data-binary @dnsbench_v8.tgz https://host:8453/api/update/upload
+curl -sk -H "X-Session-Token: $TOKEN" -X POST https://host:8453/api/update/apply
+```
+
+Both writes answer `403` when `ALLOW_UPDATES=false`. The server restarts a moment after `apply` succeeds, and every session ends with it, so sign in again to see the result.
+
 ### Schedules
 
 | Request | Purpose |
@@ -255,7 +273,27 @@ systemctl start|stop|restart|status dnsbench
 journalctl -u dnsbench -f
 ```
 
-The service runs as root because PAM must read the shadow file; the unit restricts it otherwise (`ProtectSystem=strict`, private `/tmp`, no new privileges). On disk it can write only to its state directory, `/var/lib/dnsbench`, and its private `/tmp`.
+The service runs as root because PAM must read the shadow file; the unit restricts it otherwise (`ProtectSystem=strict`, private `/tmp`, no new privileges). On disk it can write only to its state directory, `/var/lib/dnsbench`, its private `/tmp`, and `/opt/dnsbench`, which is where the Updates page installs a new version (`ReadWritePaths=-/opt/dnsbench` in the unit).
+
+---
+
+## Updating from the web UI
+
+Sign in, open **Updates**, choose the `dnsbench_vN.tgz` (or `.zip`) archive of a newer release and press **Upload**. The archive is checked (it must be a dnsbench source tree with a plain-integer `VERSION` higher than the running one; links, absolute paths and `..` are refused) and staged under `STATE_DIR/update`. Then press **Update to vN**. The server:
+
+1. builds the staged source on this host with the same settings as `install.sh` (a minute or two; the first build is slower while Go's cache fills),
+2. starts the new binary once on a spare loopback port, with a scratch state directory, and checks that its login page answers,
+3. keeps the running binary as `STATE_DIR/update/dnsbench.prev`, installs the new one in `/opt/dnsbench`, refreshes `README.md` and `LICENSE.txt` next to it, and restarts.
+
+If anything before the install fails, nothing has changed, and the page shows why. If the new version is installed but does not stay up (three starts without surviving 60 seconds), the previous binary is put back at the next start, and the page says so. The Updates page keeps a history of uploads, installs, failures and rollbacks with who did each.
+
+What to expect:
+
+- **The restart ends every session**, so you sign in again; the page does that for you once the server answers. A benchmark that is running is stopped, so the page asks first, and an update that has already been installed waits for a running benchmark to finish before it restarts.
+- **It needs what `install.sh` needs**: Go 1.22 or newer (or whatever the new release's `go.mod` asks for), a C compiler and the PAM headers. The installer leaves them in place. The page lists anything missing.
+- **It only moves forward.** Going back to an older release is `install.sh --allow-downgrade`.
+- **Installs made before this feature need one `install.sh` run** from a release that has it. That installs the unit with `ReadWritePaths=-/opt/dnsbench`; until then the page says it cannot write there.
+- **Anyone who can sign in can make this host build and run code as root** by uploading it. If the sign-in group is wider than the people you would trust with that, set `ALLOW_UPDATES=false` in `/etc/dnsbench/dnsbench.conf` and restart. Every upload and update is written to the service log with the user's name and address.
 
 ---
 
