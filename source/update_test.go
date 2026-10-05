@@ -881,3 +881,205 @@ func TestMainCountsStartsBeforeAnythingThatCanFail(t *testing.T) {
 		t.Errorf("GuardOnStart should be called from exactly one place (guardAtStart), found %d", strings.Count(src, "GuardOnStart()"))
 	}
 }
+
+// ── finding Go: PATH, the usual places, and snaps ────────────────────────────
+
+// fakeGo writes a `go` that prints a version line, as the real one does for `go version`.
+func fakeGo(t *testing.T, path, version string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho \"go version go"+version+" linux/amd64\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// searchOnly points findGo at a made-up host: only these places exist, and PATH has lookPath ("" = no go).
+func searchOnly(t *testing.T, lookPath string, fixed, globs, wrappers []string) {
+	t.Helper()
+	oLook, oGlob, oFixed, oGlobs, oWrap := goLookPath, goGlob, goFixedPaths, goGlobs, goSnapWrappers
+	t.Cleanup(func() {
+		goLookPath, goGlob, goFixedPaths, goGlobs, goSnapWrappers = oLook, oGlob, oFixed, oGlobs, oWrap
+	})
+	goLookPath = func(string) (string, error) {
+		if lookPath == "" {
+			return "", exec.ErrNotFound
+		}
+		return lookPath, nil
+	}
+	goFixedPaths, goGlobs, goSnapWrappers = fixed, globs, wrappers
+}
+
+func TestGoVersionsWithTwoDigitMinorsAreRead(t *testing.T) {
+	d := t.TempDir()
+	for _, c := range []struct {
+		ver  string
+		want int
+	}{{"1.27.1", 27}, {"1.22.2", 22}, {"1.9", 9}, {"1.24rc1", 24}} {
+		p := fakeGo(t, filepath.Join(d, c.ver, "go"), c.ver)
+		if n, ok := goMinorOf(p); !ok || n != c.want {
+			t.Errorf("go%s: %d %v, want %d", c.ver, n, ok, c.want)
+		}
+	}
+	p27 := fakeGo(t, filepath.Join(d, "x", "go"), "1.27.1")
+	if !goUsable(p27, 22) || !goUsable(p27, 27) || goUsable(p27, 28) {
+		t.Error("goUsable compares the minor version wrongly")
+	}
+	os.WriteFile(filepath.Join(d, "junk"), []byte("#!/bin/sh\necho hello\n"), 0o755)
+	if _, ok := goMinorOf(filepath.Join(d, "junk")); ok {
+		t.Error("something that is not go was accepted")
+	}
+	if _, ok := goMinorOf(filepath.Join(d, "missing")); ok {
+		t.Error("a missing file was accepted")
+	}
+}
+
+func TestFindGoFindsAGoInstalledAsASnap(t *testing.T) {
+	d := t.TempDir()
+	direct := fakeGo(t, filepath.Join(d, "snap/go/current/bin/go"), "1.27.1")
+	launcher := fakeGo(t, filepath.Join(d, "snap/bin/go"), "1.27.1")
+	// the host of the report: Go 1.27 as a snap, nothing in the usual places, and /snap/bin on the
+	// user's PATH but not the service's
+	searchOnly(t, "", []string{filepath.Join(d, "usr/local/go/bin/go"), filepath.Join(d, "usr/bin/go"), direct}, nil, []string{launcher})
+	got, err := findGo(minGoMinorFloor)
+	if err != nil || got != direct {
+		t.Fatalf("found %q, %v; want the toolchain inside the snap %q", got, err, direct)
+	}
+}
+
+func TestSnapToolchainsComeBeforeTheSnapLauncher(t *testing.T) {
+	d := t.TempDir()
+	launcher := fakeGo(t, filepath.Join(d, "snap/bin/go"), "1.27.1")
+	direct := fakeGo(t, filepath.Join(d, "snap/go/current/bin/go"), "1.27.1")
+	rev := fakeGo(t, filepath.Join(d, "snap/go/1234/bin/go"), "1.27.1")
+	// even when the launcher is the go on PATH, the toolchain is preferred: the launcher goes through
+	// `snap run`, which has to set up confinement under a unit that restricts exactly that
+	searchOnly(t, launcher, []string{direct}, []string{filepath.Join(d, "snap/go/*/bin/go")}, []string{launcher})
+	oGlob := goGlob
+	t.Cleanup(func() { goGlob = oGlob })
+	goGlob = filepath.Glob
+	c := goCandidates()
+	idx := func(p string) int {
+		for i, x := range c {
+			if x == p {
+				return i
+			}
+		}
+		return -1
+	}
+	if idx(direct) < 0 || idx(rev) < 0 || idx(launcher) < 0 {
+		t.Fatalf("candidates %v", c)
+	}
+	if !(idx(direct) < idx(launcher) && idx(rev) < idx(launcher)) {
+		t.Errorf("the launcher must come after the toolchains: %v", c)
+	}
+	if idx(launcher) != len(c)-1 {
+		t.Errorf("the launcher should be last: %v", c)
+	}
+	seen := map[string]bool{}
+	for _, x := range c {
+		if seen[x] {
+			t.Errorf("%s listed twice: %v", x, c)
+		}
+		seen[x] = true
+	}
+	if got, err := findGo(minGoMinorFloor); err != nil || got == launcher {
+		t.Errorf("chose %q (%v)", got, err)
+	}
+}
+
+func TestTheSnapLauncherIsStillUsedWhenItIsAllThereIs(t *testing.T) {
+	d := t.TempDir()
+	launcher := fakeGo(t, filepath.Join(d, "snap/bin/go"), "1.27.1")
+	searchOnly(t, launcher, nil, nil, []string{launcher})
+	if got, err := findGo(minGoMinorFloor); err != nil || got != launcher {
+		t.Fatalf("%q %v", got, err)
+	}
+}
+
+func TestPathGoComesFirstAmongPlainToolchains(t *testing.T) {
+	d := t.TempDir()
+	onPath := fakeGo(t, filepath.Join(d, "opt/go1.27/bin/go"), "1.27.1")
+	usual := fakeGo(t, filepath.Join(d, "usr/bin/go"), "1.22.2")
+	searchOnly(t, onPath, []string{usual}, nil, nil)
+	if got, _ := findGo(minGoMinorFloor); got != onPath {
+		t.Errorf("chose %q, want the one on PATH", got)
+	}
+}
+
+func TestFindGoSaysWhatItFoundWhenNothingIsNewEnough(t *testing.T) {
+	d := t.TempDir()
+	old := fakeGo(t, filepath.Join(d, "usr/bin/go"), "1.20.14")
+	snap := filepath.Join(d, "snap/go/current/bin/go")
+	searchOnly(t, "", []string{old, snap}, nil, nil)
+	_, err := findGo(22)
+	if err == nil {
+		t.Fatal("an old go was accepted")
+	}
+	for _, want := range []string{"no Go toolchain 1.22 or newer", old + " is Go 1.20", "looked on PATH and in", filepath.Dir(snap), "re-run install.sh"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+	searchOnly(t, "", []string{filepath.Join(d, "nothing/go")}, nil, nil)
+	if _, err := findGo(22); err == nil || strings.Contains(err.Error(), "too old") {
+		t.Errorf("with no go at all: %v", err)
+	}
+}
+
+// A real toolchain reached through a snap-style path (a symlink standing in for the squashfs mount) must
+// work for the whole build, not just for `go version`: GOROOT has to be found through the links.
+func TestBuildWorksWithAToolchainReachedThroughASnapStylePath(t *testing.T) {
+	out, err := exec.Command("go", "env", "GOROOT").Output()
+	if err != nil {
+		t.Skip("no go toolchain on PATH")
+	}
+	d := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(d, "snap/go"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(strings.TrimSpace(string(out)), filepath.Join(d, "snap/go/current")); err != nil {
+		t.Fatal(err)
+	}
+	snapGo := filepath.Join(d, "snap/go/current/bin/go")
+	searchOnly(t, "", []string{snapGo}, nil, nil)
+	u := realBuilder(t, "99", tinyMod, tinyMain("99"))
+	got, err := u.toolchain()
+	if err != nil || got != snapGo {
+		t.Fatalf("toolchain %q %v", got, err)
+	}
+	if _, err := u.Build(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The tests above stand in their own search lists; this one pins the real defaults, because leaving
+// the snap locations out of them is exactly how a host with Go 1.27 as a snap got "no Go toolchain found".
+func TestTheDefaultSearchIncludesSnapInstalls(t *testing.T) {
+	has := func(list []string, want string) bool {
+		for _, x := range list {
+			if x == want {
+				return true
+			}
+		}
+		return false
+	}
+	for _, want := range []string{"/snap/go/current/bin/go", "/var/lib/snapd/snap/go/current/bin/go", "/usr/bin/go", "/usr/local/go/bin/go"} {
+		if !has(goFixedPaths, want) {
+			t.Errorf("%s is not searched", want)
+		}
+	}
+	if !has(goGlobs, "/snap/go/*/bin/go") || !has(goGlobs, "/usr/lib/go-*/bin/go") {
+		t.Errorf("globs %v", goGlobs)
+	}
+	for _, w := range []string{"/snap/bin/go", "/var/lib/snapd/snap/bin/go"} {
+		if !has(goSnapWrappers, w) {
+			t.Errorf("launcher %s not known", w)
+		}
+		if has(goFixedPaths, w) {
+			t.Errorf("launcher %s must not be among the plain toolchains (it is tried last)", w)
+		}
+	}
+}

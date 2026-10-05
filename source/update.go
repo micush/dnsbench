@@ -496,17 +496,23 @@ func (u *Updater) Stage(body []byte, running string) (string, error) {
 
 var goVersionRe = regexp.MustCompile(`go version go1\.(\d+)`)
 
-func goUsable(bin string, minMinor int) bool {
+// goMinorOf runs `go version` and returns the minor version of 1.x ("go1.27.1" is 27).
+func goMinorOf(bin string) (int, bool) {
 	out, err := exec.Command(bin, "version").Output()
 	if err != nil {
-		return false
+		return 0, false
 	}
 	m := goVersionRe.FindStringSubmatch(string(out))
 	if m == nil {
-		return false
+		return 0, false
 	}
 	n, _ := strconv.Atoi(m[1])
-	return n >= minMinor
+	return n, true
+}
+
+func goUsable(bin string, minMinor int) bool {
+	n, ok := goMinorOf(bin)
+	return ok && n >= minMinor
 }
 
 // goMinor is the Go minor version the staged source asks for in go.mod (never below what
@@ -523,22 +529,103 @@ func (u *Updater) goMinor() int {
 	return minor
 }
 
-func findGo(minMinor int) (string, error) {
-	var cands []string
-	if p, err := exec.LookPath("go"); err == nil {
-		cands = append(cands, p)
+// Where findGo looks. Variables so tests can stand in for a host whose Go is somewhere unusual.
+//
+// The daemon runs under systemd with a default PATH, which has neither /usr/local/go/bin nor
+// /snap/bin, even though install.sh (run from a shell that has them) found the same Go. A snap puts the
+// real toolchain at /snap/go/current/bin/go (/var/lib/snapd/snap/... on Fedora-style layouts) and a
+// launcher that goes through `snap run` at /snap/bin/go. The toolchain is used directly: the launcher
+// has to set up snap confinement and cgroups first, which is what the unit's hardening is most
+// likely to get in the way of, so launchers are tried last.
+var (
+	goLookPath   = exec.LookPath
+	goGlob       = filepath.Glob
+	goFixedPaths = []string{
+		"/usr/local/go/bin/go", "/usr/bin/go", "/usr/lib/go/bin/go", "/usr/lib/golang/bin/go",
+		"/snap/go/current/bin/go", "/var/lib/snapd/snap/go/current/bin/go",
 	}
-	cands = append(cands, "/usr/local/go/bin/go", "/usr/bin/go", "/usr/lib/go/bin/go", "/usr/lib/golang/bin/go")
-	if m, _ := filepath.Glob("/usr/lib/go-*/bin/go"); len(m) > 0 {
-		sort.Sort(sort.Reverse(sort.StringSlice(m)))
-		cands = append(cands, m...)
-	}
-	for _, c := range cands {
-		if goUsable(c, minMinor) {
-			return c, nil
+	goGlobs        = []string{"/usr/lib/go-*/bin/go", "/snap/go/*/bin/go", "/var/lib/snapd/snap/go/*/bin/go"}
+	goSnapWrappers = []string{"/snap/bin/go", "/var/lib/snapd/snap/bin/go"}
+)
+
+func isSnapWrapper(p string) bool {
+	for _, w := range goSnapWrappers {
+		if p == w {
+			return true
 		}
 	}
-	return "", fmt.Errorf("no Go toolchain 1.%d or newer found on this server (install Go, or re-run install.sh)", minMinor)
+	if r, err := filepath.EvalSymlinks(p); err == nil && filepath.Base(r) == "snap" {
+		return true // a symlink to the snap command itself
+	}
+	return false
+}
+
+// goCandidates lists every go command worth trying, best first: the one on PATH, the usual
+// places, the toolchains inside snaps (newest revision first), and last the snap launchers.
+func goCandidates() []string {
+	var out, wrappers []string
+	seen := map[string]bool{}
+	add := func(list *[]string, p string) {
+		if p != "" && !seen[p] {
+			seen[p] = true
+			*list = append(*list, p)
+		}
+	}
+	if p, err := goLookPath("go"); err == nil {
+		if isSnapWrapper(p) {
+			add(&wrappers, p)
+		} else {
+			add(&out, p)
+		}
+	}
+	for _, p := range goFixedPaths {
+		add(&out, p)
+	}
+	for _, g := range goGlobs {
+		m, _ := goGlob(g)
+		sort.Sort(sort.Reverse(sort.StringSlice(m)))
+		for _, p := range m {
+			add(&out, p)
+		}
+	}
+	for _, p := range goSnapWrappers {
+		add(&wrappers, p)
+	}
+	return append(out, wrappers...)
+}
+
+// goSearchedDirs is the human-readable list of where findGo looks, for the error message.
+func goSearchedDirs() string {
+	var dirs []string
+	seen := map[string]bool{}
+	for _, l := range [][]string{goFixedPaths, goGlobs, goSnapWrappers} {
+		for _, p := range l {
+			if d := filepath.Dir(p); !seen[d] {
+				seen[d] = true
+				dirs = append(dirs, d)
+			}
+		}
+	}
+	return strings.Join(dirs, ", ")
+}
+
+func findGo(minMinor int) (string, error) {
+	var tooOld []string
+	for _, c := range goCandidates() {
+		n, ok := goMinorOf(c)
+		switch {
+		case !ok:
+		case n >= minMinor:
+			return c, nil
+		default:
+			tooOld = append(tooOld, fmt.Sprintf("%s is Go 1.%d", c, n))
+		}
+	}
+	msg := fmt.Sprintf("no Go toolchain 1.%d or newer found on this server (looked on PATH and in %s", minMinor, goSearchedDirs())
+	if len(tooOld) > 0 {
+		msg += "; found, but too old: " + strings.Join(tooOld, ", ")
+	}
+	return "", fmt.Errorf("%s; install Go, or re-run install.sh)", msg)
 }
 
 // toolchain is findGo for the current staged source, remembered for 30 s because the page asks

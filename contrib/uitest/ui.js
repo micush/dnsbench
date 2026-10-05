@@ -467,7 +467,7 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     const tieP = (await sweepTips('compareP95Canvas')).filter(t => t.includes('Lowest p95'));
     check('pies: a tie features no slice, while the other pie still does', tieQ.length === 0 && tieP.length === 1, JSON.stringify([tieQ, tieP]));
 
-    // Live comparison: once open it follows the ticks; no second click on Compare
+    // The comparison needs no button: ticking two or more results shows it, and it follows the ticks
     await page.evaluate(() => {
       closeCompare(); runHistory.length = 0;
       [['10.0.0.1', 4000, 5], ['10.0.0.2', 3000, 8], ['10.0.0.3', 2000, 12], ['10.0.0.4', 1000, 20]].forEach((r, i) =>
@@ -478,37 +478,51 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     const names4 = () => page.locator('#compareLegend .pie-legend-name').allTextContents().then(a => a.map(t => t.split(' ')[0]));
     const swatches = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#compareLegend .pie-legend-row')].map(r => [r.querySelector('.pie-legend-name').textContent.split(' ')[0], r.querySelector('.pie-swatch').style.background])));
     const panelShown = () => page.evaluate(() => !document.getElementById('compareChart').classList.contains('d-none'));
-    const btnShown = () => page.evaluate(() => !document.getElementById('btnCompare').classList.contains('d-none'));
+    check('auto: there is no Compare button on the Results page', (await page.locator('#btnCompare').count()) === 0 && await page.evaluate(() => [...document.querySelectorAll('#page-history button')].every(b => !/^\s*compare\s*$/i.test(b.textContent))));
     await tick(0);
-    check('live: with one ticked there is no Compare button and no panel', !(await btnShown()) && !(await panelShown()));
+    check('auto: with one ticked there is no comparison', !(await panelShown()));
     await tick(1);
-    check('live: with two ticked the Compare button appears and the panel is still closed', (await btnShown()) && !(await panelShown()));
-    await page.click('#btnCompare');
-    check('live: clicking Compare opens the panel with the two runs and the button steps aside',
-      (await panelShown()) && !(await btnShown()) && JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.2']), JSON.stringify(await names4()));
+    check('auto: ticking a second run opens the comparison by itself, with both runs',
+      (await panelShown()) && JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.2']), JSON.stringify(await names4()));
     await tick(2);
-    check('live: ticking a third run adds it without clicking Compare', JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.2', '10.0.0.3']), JSON.stringify(await names4()));
+    check('auto: ticking a third run adds it', JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.2', '10.0.0.3']), JSON.stringify(await names4()));
     await tick(3);
-    check('live: ticking a fourth adds that too', JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4']), JSON.stringify(await names4()));
+    check('auto: ticking a fourth adds that too', JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4']), JSON.stringify(await names4()));
     const sw4 = await swatches();
-    check('live: all four runs have different colours', new Set(Object.values(sw4)).size === 4, JSON.stringify(sw4));
+    check('auto: all four runs have different colours', new Set(Object.values(sw4)).size === 4, JSON.stringify(sw4));
     const livePaint = await painted('compareQpsCanvas');
-    check('live: the redrawn pie is actually painted', livePaint.diff > 200, JSON.stringify(livePaint));
+    check('auto: the redrawn pie is actually painted', livePaint.diff > 200, JSON.stringify(livePaint));
     await tick(1);
     const sw3 = await swatches();
-    check('live: unticking one removes it from the comparison', JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.3', '10.0.0.4']), JSON.stringify(await names4()));
-    check('live: the runs that stay keep their colours', sw3['10.0.0.1'] === sw4['10.0.0.1'] && sw3['10.0.0.3'] === sw4['10.0.0.3'] && sw3['10.0.0.4'] === sw4['10.0.0.4'], JSON.stringify([sw4, sw3]));
+    check('auto: unticking one removes it from the comparison', JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.3', '10.0.0.4']), JSON.stringify(await names4()));
+    check('auto: the runs that stay keep their colours', sw3['10.0.0.1'] === sw4['10.0.0.1'] && sw3['10.0.0.3'] === sw4['10.0.0.3'] && sw3['10.0.0.4'] === sw4['10.0.0.4'], JSON.stringify([sw4, sw3]));
     await tick(1);
     const swBack = await swatches();
-    check('live: a run ticked again takes the freed colour, and the others still keep theirs', swBack['10.0.0.2'] === sw4['10.0.0.2'] && swBack['10.0.0.1'] === sw4['10.0.0.1'], JSON.stringify([sw4, swBack]));
+    check('auto: a run ticked again takes the freed colour, and the others still keep theirs', swBack['10.0.0.2'] === sw4['10.0.0.2'] && swBack['10.0.0.1'] === sw4['10.0.0.1'], JSON.stringify([sw4, swBack]));
     await tick(0); await tick(1); await tick(2);
-    check('live: with only one run left the panel hides itself', !(await panelShown()) && !(await btnShown()));
+    check('auto: with only one run left the comparison goes away', !(await panelShown()));
     await tick(1);
-    check('live: ticking back up to two brings the comparison back without a click', (await panelShown()) && JSON.stringify(await names4()) === JSON.stringify(['10.0.0.2', '10.0.0.4']), JSON.stringify(await names4()));
+    check('auto: ticking back up to two brings it back', (await panelShown()) && JSON.stringify(await names4()) === JSON.stringify(['10.0.0.2', '10.0.0.4']), JSON.stringify(await names4()));
     await page.click('#compareChart button');
-    check('live: the X closes it and clears the ticks', !(await panelShown()) && (await page.locator('#historyList input[type=checkbox]:checked').count()) === 0);
+    check('auto: the X closes it and clears the ticks', !(await panelShown()) && (await page.locator('#historyList input[type=checkbox]:checked').count()) === 0);
     await tick(0); await tick(1);
-    check('live: after closing, ticking two does not reopen it; Compare is offered again', !(await panelShown()) && (await btnShown()));
+    check('auto: after the X, ticking two opens it again by itself', (await panelShown()) && JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.2']), JSON.stringify(await names4()));
+    // a run with no result yet (still running, or failed) cannot be compared, so it does not count towards the two
+    await page.evaluate(() => { closeCompare(); runHistory.push({ started: '2026-10-05 08:09:00', args: { server: '10.0.0.9', protocol: 'udp' } }); renderHistory(); });
+    await tick(4); await tick(0);
+    check('auto: a ticked run without results does not open a comparison on its own', !(await panelShown()));
+    await tick(1);
+    check('auto: the comparison opens once two runs with results are ticked, and leaves the one without out', (await panelShown()) && JSON.stringify(await names4()) === JSON.stringify(['10.0.0.1', '10.0.0.2']), JSON.stringify(await names4()));
+    // down a long list, the second tick is far below the panel: it is brought into view rather than left above the screen
+    await page.evaluate(() => {
+      closeCompare(); runHistory.length = 0;
+      for (let i = 0; i < 16; i++) runHistory.push({ started: '2026-10-05 07:' + String(10 + i) + ':00', args: { server: '10.1.0.' + i, protocol: 'udp' }, stats: { qps: 1000 + i, p95: 5 + i, errors: 0, sent: 1000 } });
+      renderHistory(); updateToolbar();
+      document.querySelector('.main-content').scrollTop = 1e6;
+    });
+    await tick(15); await tick(14);
+    const inView = await page.evaluate(() => { const r = document.getElementById('compareChart').getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight }; });
+    check('auto: opening the comparison from far down the list brings it into view', inView.top >= -2 && inView.top < inView.vh && inView.bottom > 0, JSON.stringify(inView));
     await page.evaluate(() => closeCompare());
     await page.evaluate(() => closeCompare());
     check('charts: closing removes the tooltip', (await page.locator('[role=tooltip]').count()) === 0);

@@ -408,14 +408,11 @@
   <div id="page-history" class="page">
     <div style="margin-bottom:20px">
       <h1 style="font-size:1.859rem;font-weight:600;color:var(--text);margin:0 0 2px"><i class="bi bi-list-check text-primary me-2"></i>Results</h1>
-      <p style="font-size:1.014rem;color:var(--muted);margin:0">Benchmark results. Select two or more to compare.</p>
+      <p style="font-size:1.014rem;color:var(--muted);margin:0">Benchmark results. Tick two or more to compare them.</p>
     </div>
     <div class="d-flex align-items-center justify-content-between mb-1">
       <h5 class="fw-bold mb-0" style="display:none"></h5>
       <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-outline-primary d-none" id="btnCompare" onclick="compareSelected()">
-          <i class="bi bi-pie-chart me-1"></i>Compare
-        </button>
         <button class="btn btn-sm btn-outline-secondary" id="btnExport" onclick="exportHistoryCSV()">
           <i class="bi bi-download me-1"></i>Export CSV
         </button>
@@ -424,7 +421,7 @@
         </button>
       </div>
     </div>
-    <p class="text-muted small mb-3">Select two or more runs to compare. Once the comparison is open it follows your selection. Stored across sessions.</p>
+    <p class="text-muted small mb-3">Tick two or more runs and they are compared here automatically; the comparison follows your selection. Stored across sessions.</p>
     <div id="compareChart" class="d-none mb-3" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
         <span style="font-size:1.066rem;font-weight:500;color:var(--text)">Comparison</span>
@@ -1582,7 +1579,6 @@ function parseStats(lines){
 let _compareChart=null;
 let _compareP95Chart=null;
 let _compareVisible={};
-let _compareLive=false;        // the comparison has been opened and follows the ticked results until it is closed
 let _compareSig='';            // what the panel currently shows, so it only redraws when that changes
 const _colorSlot=new Map();    // run -> palette slot, kept while the run stays ticked so its colour never changes under you
 // First ten are fixed (blue and orange first, as before), then golden-angle hues for any number more.
@@ -1664,10 +1660,7 @@ function exportHistoryCSV(){
 
 function updateToolbar(){
   const selected=runHistory.filter(r=>r._selected);
-  const btnCompare=document.getElementById('btnCompare');
   const btnClear=document.getElementById('btnClear');
-  const panelOpen=!document.getElementById('compareChart').classList.contains('d-none');
-  btnCompare.classList.toggle('d-none', selected.length<2 || panelOpen);   // once open, the panel follows the ticks
   if(btnClear) btnClear.innerHTML=selected.length>0
     ? '<i class="bi bi-trash me-1"></i>Remove selected ('+selected.length+')'
     : '<i class="bi bi-trash me-1"></i>Clear';
@@ -1675,7 +1668,7 @@ function updateToolbar(){
 
 function toggleSelect(idx){
   runHistory[idx]._selected=!runHistory[idx]._selected;
-  renderHistory();     // also brings an open comparison up to date
+  renderHistory();     // also opens, updates or closes the comparison to match the ticks
   updateToolbar();
 }
 
@@ -1683,26 +1676,29 @@ function compareSigOf(selected){
   return selected.map(r=>[r.started,(r.args||{}).server,(r.args||{}).protocol,r.stats.qps,r.stats.p95,r.stats.errors,r.stats.sent].join('|')).join(';');
 }
 
-// Hide the panel without forgetting that it is open: ticking back up to two brings it back.
 function hideComparePanel(){
   closeCompareCharts();
   _compareSig='';
   document.getElementById('compareChart').classList.add('d-none');
-  updateToolbar();
 }
 
-// Called whenever the list is drawn: redraw the open comparison if the ticked results (or their numbers) changed.
+// The comparison is a function of what is ticked: two or more runs with results show it, fewer hide
+// it. Called whenever the list is drawn; it redraws only when the ticked runs, or their numbers, changed.
 function syncCompare(){
-  if(!_compareLive) return;
+  const panel=document.getElementById('compareChart');
   const selected=runHistory.filter(r=>r._selected && r.stats);
-  if(selected.length<2){ if(_compareSig!=='' || !document.getElementById('compareChart').classList.contains('d-none')) hideComparePanel(); return; }
-  if(compareSigOf(selected)!==_compareSig) compareSelected();
+  if(selected.length<2){ if(!panel.classList.contains('d-none') || _compareSig!=='') hideComparePanel(); return; }
+  if(compareSigOf(selected)===_compareSig && !panel.classList.contains('d-none')) return;
+  const opening=panel.classList.contains('d-none');
+  compareSelected();
+  // The panel sits above the list. When it appears while you are down the list (you have just ticked a
+  // second run there), bring it into view instead of leaving it above the screen.
+  if(opening) panel.scrollIntoView({block:'nearest'});
 }
 
 function compareSelected(){
   const selected=runHistory.filter(r=>r._selected && r.stats);
-  if(selected.length<2){ if(_compareLive) hideComparePanel(); return; }
-  _compareLive=true;
+  if(selected.length<2){ hideComparePanel(); return; }
   _compareSig=compareSigOf(selected);
   const cs=getComputedStyle(document.documentElement);
   const tok=n=>cs.getPropertyValue(n).trim();
@@ -1767,7 +1763,6 @@ function compareSelected(){
   });
 
   document.getElementById('compareChart').classList.remove('d-none');
-  updateToolbar();
 }
 
 function closeCompareCharts(){
@@ -1776,12 +1771,11 @@ function closeCompareCharts(){
 }
 
 function closeCompare(){
-  _compareLive=false; _compareSig=''; _colorSlot.clear();
+  _compareSig=''; _colorSlot.clear();
   closeCompareCharts();
   _compareVisible={};
   document.getElementById('compareChart').classList.add('d-none');
   runHistory.forEach(r=>{ r._selected=false; });
-  document.getElementById('btnCompare').classList.add('d-none');
   updateToolbar();
   renderHistory();
 }

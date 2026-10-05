@@ -1,5 +1,45 @@
 # Changelog
 
+## [v10] - 2026-10-05 — The Updates page finds a Go installed as a snap
+
+### Fixed
+- **"no Go toolchain 1.22 or newer found on this server" on a host whose Go is a snap (Go 1.27 here).** The installer found that Go because it runs from your shell, where `/snap/bin` is on `PATH`. The daemon runs under systemd with a plain `PATH`, and the updater looked only there and in `/usr/local/go`, `/usr/bin`, `/usr/lib/go*` and `/usr/lib/golang`, so a snap was never found, whatever its version.
+  - It now also looks at the toolchain inside the snap, `/snap/go/current/bin/go` and `/snap/go/*/bin/go` (and the same under `/var/lib/snapd/snap/` for Fedora-style layouts). The toolchain itself is used, not the `/snap/bin/go` launcher: the launcher goes through `snap run`, which has to set up snap confinement and cgroups first, and the unit's hardening (`ProtectControlGroups`, a read-only `/run`) is the likeliest thing to get in the way of that. The launchers (`/snap/bin/go`, `/var/lib/snapd/snap/bin/go`) are kept as a last resort, behind everything else, and a launcher that is the `go` on `PATH` is demoted the same way.
+  - **The error now says what it saw**: where it looked, and, when something was found, "`/usr/bin/go is Go 1.20`" and that it is too old, so a Go that is present but old is not mistaken for no Go at all.
+- README: the Updating section says where Go is looked for.
+
+### Verified
+- Full release process on the final tree: `gofmt -l` (nothing), `go vet`, `go build -buildvcs=false`, `go test -race -count=1` three times in a row, `CGO_ENABLED=0` vet and `go test -count=1`, cross-compile for linux/amd64, arm64, arm, 386, riscv64, ppc64le, s390x, loong64 and mips, mipsle, mips64, mips64le, and the 32-bit (386) test binary run for real.
+- New tests: two-digit minors are read (1.27, 1.22, 1.9, 1.24rc1) and compared correctly; a host whose only Go is a snap (usual places empty, `/snap/bin` not on the service's `PATH`) finds the toolchain inside the snap, not the launcher; toolchains are ranked before launchers, with no duplicates, even when the launcher is the `go` on `PATH`; the launcher is still used when it is all there is; the `go` on `PATH` wins among plain toolchains; the error reports a too-old Go and the places searched; the production default lists contain the snap locations (the other tests substitute their own lists, which is how leaving them out would have gone unnoticed); and **a real build through a snap-style path** (a symlink standing in for the squashfs mount, to a real toolchain) compiles and checks a binary, so `GOROOT` is found through the links and not just `go version`.
+- Mutation checks, each caught by a test: snap toolchain dropped from the defaults, snap glob dropped, launcher tried before toolchains, a launcher on `PATH` treated as a plain toolchain, a too-old Go not reported, only one digit of the minor version read. (A first attempt at the last one had the wrong escaping and was skipped, not passed; it was redone.)
+
+### Not verified
+- **A real snap.** The sandbox has no snapd and no snap Go, so the snap layout is simulated with a symlink to a real toolchain. That `/snap/go/current/bin/go` exists with that name on a host with `snap install go --classic` is from how the snap is laid out, not from here; if a host's snap is named or laid out differently, the page now lists where it looked.
+- That a snap-installed Go works from inside the service's sandbox (`ProtectSystem=strict`, private `/tmp`, `HOME` pointing at `STATE_DIR/update`). The toolchain is a plain binary on a read-only mount and does not need snapd, which is why it is used directly, but this was not run under real systemd.
+- The browser tests (`ui.js`, `update.js`) and CodeQL were not re-run: only the toolchain search in `update.go` changed (no page, no input handling, no installer, unit or config).
+- Firefox and Safari. Chromium only.
+
+## [v9] - 2026-10-05 — No Compare button: ticking two results compares them
+
+### Changed
+- **The Compare button on Results is gone.** Ticking two or more results shows the comparison by itself; ticking one more adds it, unticking removes it, and with fewer than two ticked it goes away. It was only needed to open the panel the first time (from v7 the panel already followed the ticks once open), so the "open" state is gone: what is ticked alone decides whether the panel shows, and the page's `_compareLive` flag and the button's show/hide logic were removed with it.
+  - The X on the panel still closes it and clears the ticks. Ticking two again opens it again (before, it needed the button again).
+  - A run with no result (still running, or failed) can be ticked but does not count towards the two; the panel opens when two runs with results are ticked and leaves the others out.
+  - **The panel is brought into view when it appears.** It sits above the list, so ticking a second run far down a long list used to open it off the top of the screen. It now scrolls to it, once, when it opens (not on every later tick). The cost: the page moves up, so you lose your place in the list; scroll back down to tick more, and the panel keeps updating above.
+  - The hint texts under the Results heading say that ticking two or more compares them.
+- The pie-chart icon was only used by the button; it is removed from `contrib/icons/gen.py` and `ui.css` (37 icons).
+- README: the Results bullet says ticking two or more compares them automatically.
+
+### Verified
+- Full release process on the final tree: `gofmt -l` (nothing), `go vet`, `go build -buildvcs=false`, `go test -race -count=1` three times in a row, `CGO_ENABLED=0` vet and `go test -count=1`, cross-compile for linux/amd64, arm64, arm, 386, riscv64, ppc64le, s390x, loong64 and mips, mipsle, mips64, mips64le, and the 32-bit (386) test binary run for real.
+- `ui.js` against the real daemon (native amd64 cgo build, real PAM login with a throwaway user, UDP reflector) in Chromium, light and dark: all checks pass. The block that drove the Compare button now drives the ticks: no Compare button anywhere on the page, nothing with one tick, both runs after the second tick with no click, a third and fourth added, four distinct colours and a painted pie, an untick removing one while the others keep their colours, a re-ticked run taking the freed colour, the panel going away below two and returning at two, the X closing it and clearing the ticks and two more ticks opening it again, a run without results not counting, and the panel being in the viewport after ticking the last two of sixteen runs from the bottom of the list.
+- Mutation checks: with the scroll-into-view disabled the "brings it into view" check fails; with the automatic open broken (the old behaviour) seven checks fail, including the one for the second tick opening the comparison. (The first attempt at the second mutation ran against a stale daemon because my harness killed it by the wrong PID, so it was redone with the daemon stopped by name; the figures above are from the redo.)
+- Screenshots of Results before and after ticking two runs, in light and dark.
+
+### Not verified
+- `update.js` (the end-to-end update with a restart) and the installer checks were not re-run: nothing in the updater, the unit, the config or the scripts changed, and the Go code differs from v8 only in the embedded `VERSION`.
+- Firefox and Safari. Chromium only.
+
 ## [v8] - 2026-10-05 — Update dnsbench from the web UI
 
 ### Added
