@@ -5,6 +5,8 @@
 dns[bench] is one daemon that generates DNS load against any resolver and reports throughput, latency percentiles and response codes. Drive it from the web UI or from curl, run benchmarks on a schedule, and compare runs side by side.
 
 ---
+![Benchmarking results](snaps/results.png)
+---
 
 ## Features
 
