@@ -1,0 +1,33 @@
+[Unit]
+Description=dnsbench — DNS benchmark with a web UI
+Documentation=file:///opt/dnsbench/README.md
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/dnsbench/dnsbench.conf
+ExecStart=/opt/dnsbench/dnsbench
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dnsbench
+
+# PAM has to read the shadow file, so the service runs as root; the rest is
+# locked down.
+StateDirectory=dnsbench
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,1826 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <script src="/theme.js"></script>
+  <title>dns[bench]</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <style>
+    /* Dark is the default palette; the light one overrides it. theme.js always
+       sets data-bs-theme to "light" or "dark" (from the system setting unless the
+       user picked one), so exactly one applies. */
+    :root {
+      --bg:       #272c3c;
+      --bg2:      #383f4c;
+      --bg3:      #3f4655;
+      --border:   rgba(255,255,255,.10);
+      --accent:   #4f7cff;
+      --accent2:  #2d4fd6;
+      --accent-text:#95b4ff;
+      --text:     #e2e4ea;
+      --muted:    #9ba0ae;
+      --muted2:   #515973;
+      --success:  #34d399;
+      --danger:   #f89999;
+      --warn:     #fbbf24;
+      --term-bg:  #202735;
+      --term-fg:  #a8b3cc;
+      --term-ok:  #34d399;
+      --term-warn:#fbbf24;
+      --term-err: #f87171;
+      --term-hdr: #7aa2f7;
+      --term-dim: #696f99;
+      --code-fg:  #9bb9d5;
+      --termbar-bg:rgba(255,255,255,.04);
+      --grid:     rgba(255,255,255,.12);
+      --stop-bg:  rgba(248,113,113,.16);
+      --stop-border:rgba(248,113,113,.55);
+      --stop-hover:rgba(248,113,113,.26);
+      --radius:   6px;
+      --sidebar-w:200px;
+    }
+    [data-bs-theme="light"] {
+      --bg:       #f4f5f8;
+      --bg2:      #ffffff;
+      --bg3:      #eaecf0;
+      --border:   rgba(0,0,0,.10);
+      --accent-text:#2d4fd6;
+      --text:     #1a1d27;
+      --muted:    #65697e;
+      --muted2:   #d0d3de;
+      --success:  #057856;
+      --danger:   #ce2020;
+      --warn:     #aa4f09;
+      --term-bg:  #f0f2f5;
+      --term-fg:  #2c3152;
+      --term-ok:  #057d59;
+      --term-warn:#af5109;
+      --term-err: #d62222;
+      --term-hdr: #2563eb;
+      --term-dim: #8489a3;
+      --code-fg:  #1f4e79;
+      --termbar-bg:rgba(0,0,0,.035);
+      --grid:     rgba(0,0,0,.09);
+      --stop-bg:  #fdeaea;
+      --stop-border:#f0a8a8;
+      --stop-hover:#fbd5d5;
+    }
+    /* Make Bootstrap's own components (modal, tables, alerts, code blocks) use the same palette. */
+    [data-bs-theme="dark"],[data-bs-theme="light"] {
+      --bs-body-bg: var(--bg);
+      --bs-body-color: var(--text);
+      --bs-secondary-bg: var(--bg3);
+      --bs-tertiary-bg: var(--bg2);
+      --bs-border-color: var(--border);
+    }
+    *,*::before,*::after{box-sizing:border-box}
+    body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,sans-serif;
+          font-size:13px;line-height:1.5}
+    /* ── sidebar ── */
+    .sidebar{width:var(--sidebar-w);flex-shrink:0;height:100vh;position:sticky;top:0;
+              overflow-y:auto;border-right:1px solid var(--border);background:var(--bg2);
+              display:flex;flex-direction:column}
+    .sb-logo{padding:16px 14px 12px;display:flex;align-items:center;gap:9px;
+              border-bottom:1px solid var(--border)}
+    .sb-logo-icon{width:28px;height:28px;background:var(--accent);border-radius:7px;
+                   display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .sb-logo-icon i{color:#fff;font-size:1.105rem}
+    .sb-logo-text{font-size:1.17rem;font-weight:600;letter-spacing:-.01em;color:var(--text)}
+    .sb-nav{padding:8px 8px;flex:1}
+    .sb-sep{height:1px;background:var(--border);margin:6px 0}
+    .nav-link{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius);
+               color:var(--muted);font-size:1.066rem;font-weight:450;transition:.12s;cursor:pointer;
+               text-decoration:none}
+    .nav-link:hover{background:var(--bg3);color:var(--text)}
+    .nav-link.active{background:rgba(79,124,255,.12);color:var(--accent-text);font-weight:550}
+    .nav-link i{width:15px;text-align:center;font-size:1.04rem;opacity:.8}
+    /* ── main ── */
+    .main-content{flex:1;overflow-y:auto;height:100vh;padding:20px 22px}
+    .page{display:none}.page.active{display:block}
+    /* ── form primitives ── */
+    .block{margin-bottom:14px}
+    .lbl{font-size:0.936rem;font-weight:550;letter-spacing:.04em;text-transform:uppercase;
+           color:var(--muted);margin-bottom:6px;display:block}
+    .ctrl{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);
+           color:var(--text);padding:6px 9px;font-size:1.066rem;outline:none;transition:.12s}
+    .ctrl:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,124,255,.12)}
+    select.ctrl{cursor:pointer}
+    /* ── segmented control ── */
+    .seg{display:flex;background:var(--bg3);border:1px solid var(--border);
+          border-radius:var(--radius);padding:2px;gap:2px}
+    .seg input{display:none}
+    .seg label{flex:1;text-align:center;padding:4px 0;font-size:1.014rem;font-weight:500;
+                color:var(--muted);border-radius:4px;cursor:pointer;transition:.12s}
+    .seg input:checked+label{background:var(--bg2);color:var(--text);
+                               box-shadow:0 1px 3px rgba(0,0,0,.25)}
+    /* ── node buttons ── */
+    .node-btn{padding:4px 10px;font-size:0.975rem;border-radius:4px;cursor:pointer;
+               border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+               white-space:nowrap;transition:.12s;font-weight:450}
+    .node-btn:hover{border-color:var(--muted2);color:var(--text)}
+    .node-btn.active{background:rgba(79,124,255,.1);border-color:rgba(79,124,255,.35);color:var(--accent-text)}
+    /* ── run button ── */
+    .run-btn{width:100%;padding:10px;border-radius:var(--radius);background:var(--accent);
+              border:none;color:#fff;font-size:1.144rem;font-weight:600;cursor:pointer;
+              letter-spacing:.01em;transition:.12s}
+    .run-btn:hover{background:var(--accent2)}
+    .run-btn:active{transform:translateY(1px)}
+    .stop-btn{background:var(--stop-bg);border:1px solid var(--stop-border);color:var(--danger)}
+    .stop-btn:hover{background:var(--stop-hover)}
+    /* ── checks ── */
+    .check-row{display:flex;gap:16px}
+    .check{display:flex;align-items:center;gap:6px;font-size:1.04rem;color:var(--muted);cursor:pointer}
+    .check input{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
+    .check:hover{color:var(--text)}
+    /* ── terminal ── */
+    .term-wrap{background:var(--term-bg);border-radius:var(--radius);
+                border:1px solid var(--border);overflow:hidden}
+    .term-bar{display:flex;align-items:center;justify-content:space-between;
+               padding:7px 10px;background:var(--termbar-bg);border-bottom:1px solid var(--border)}
+    .term-bar-title{font-size:0.936rem;color:var(--muted);font-weight:500}
+    .term-bar-actions{display:flex;gap:8px;align-items:center}
+    #terminal{font-family:'Cascadia Code','Fira Mono','Menlo',monospace;font-size:0.949rem;
+               line-height:1.75;color:var(--term-fg);padding:12px 14px;
+               min-height:320px;max-height:480px;overflow-y:auto;
+               white-space:pre-wrap;word-break:break-all}
+    .term-ok{color:var(--term-ok)}.term-warn{color:var(--term-warn)}
+    .term-err{color:var(--term-err)}.term-hdr{color:var(--term-hdr);font-weight:500}
+    .term-dim{color:var(--term-dim)}
+    /* ── misc ── */
+    .badge-pill{font-size:0.884rem;padding:2px 7px;border-radius:10px;font-weight:500}
+    .hint{font-size:0.936rem;color:var(--muted);margin-top:4px}
+  </style>
+</head>
+<body style="display:flex;height:100vh;overflow:hidden;margin:0">
+
+<nav class="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-icon"><i class="bi bi-speedometer2"></i></div>
+    <span class="sb-logo-text">dns[bench]</span>
+  </div>
+  <div class="sb-nav">
+    <a href="#" class="nav-link active" onclick="showPage('bench',this);return false">
+      <i class="bi bi-play-circle-fill"></i> Benchmark
+    </a>
+    <a href="#" class="nav-link" onclick="showPage('schedules',this);return false">
+      <i class="bi bi-calendar-check"></i> Schedules
+    </a>
+    <a href="#" class="nav-link" onclick="showPage('history',this);return false">
+      <i class="bi bi-list-check"></i> Results
+    </a>
+    <a href="#" class="nav-link" onclick="showPage('readme',this);return false">
+      <i class="bi bi-file-text"></i> ReadMe
+    </a>
+    <a href="#" class="nav-link" onclick="showPage('license',this);return false">
+      <i class="bi bi-file-earmark-text"></i> License
+    </a>
+  </div>
+  <div style="padding:0 8px 14px;margin-top:auto">
+    <div class="sb-sep"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 6px 0">
+      <span style="font-size:1.04rem;font-weight:500;color:var(--text)">__USER__</span>
+      <div style="display:flex;gap:2px">
+        <button onclick="toggleTheme()" data-theme-toggle title="Toggle theme"
+                style="background:none;border:none;padding:4px 6px;border-radius:4px;
+                       color:var(--muted);cursor:pointer;font-size:1.17rem">
+          <i class="bi bi-circle-half"></i>
+        </button>
+        <a href="/logout" title="Sign out"
+           style="display:flex;align-items:center;background:none;border:none;padding:4px 6px;
+                  border-radius:4px;color:var(--danger);cursor:pointer;font-size:1.17rem;
+                  text-decoration:none;opacity:.7">
+          <i class="bi bi-box-arrow-right"></i>
+        </a>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<div class="main-content">
+
+  <!-- Benchmark -->
+  <div id="page-bench" class="page active">
+    
+
+    <!-- Page title -->
+    <div style="margin-bottom:22px">
+      <h1 style="font-size:1.774rem;font-weight:600;color:var(--text);margin:0 0 3px;letter-spacing:-.01em"><i class="bi bi-play-circle-fill text-primary me-2"></i>Benchmark</h1>
+      <p style="font-size:0.988rem;color:var(--muted);margin:0">DNS server test.</p>
+    </div>
+
+    <!-- Benchmark form -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden">
+      <div style="display:grid;grid-template-columns:1fr 360px">
+
+        <!-- LEFT: controls -->
+        <div style="padding:16px 18px;border-right:1px solid var(--border);display:flex;flex-direction:column">
+
+          <!-- Target section -->
+          <div style="font-size:0.884rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)">Target</div>
+          <div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+              <span class="lbl" style="margin:0">Server</span>
+            </div>
+            <div style="position:relative">
+              <input id="server" type="text" class="ctrl" placeholder="127.0.0.1 or hostname" autocomplete="off"
+                     style="padding-right:30px" oninput="filterServerList(this.value)" onfocus="showServerList()" onblur="setTimeout(hideServerList,150)">
+              <button onclick="toggleServerList()" tabindex="-1" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.936rem">&#9660;</button>
+              <div id="serverList" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:999;background:var(--bg2);border:1px solid var(--accent);border-top:none;border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.3)"></div>
+            </div>
+          </div>
+          <div style="margin-bottom:14px">
+            <span class="lbl">Protocol</span>
+            <select id="protocol" class="ctrl" onchange="onProtocolChange()">
+              <option value="udp">UDP — DNS</option>
+              <option value="tcp">TCP — DNS</option>
+              <option value="dot">DoT — DNS over TLS</option>
+              <option value="doh">DoH — DNS over HTTPS</option>
+            </select>
+            <div id="dohExtras" style="display:none;margin-top:8px">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div><span class="lbl">Method</span><select id="dohMethod" class="ctrl"><option value="post">POST</option><option value="get">GET</option></select></div>
+                <div><span class="lbl">Version</span><select id="dohProtocol" class="ctrl"><option value="1.1">HTTP/1.1</option><option value="2">HTTP/2</option></select></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Load section -->
+          <div style="height:1px;background:var(--border);margin-bottom:14px"></div>
+          <div style="font-size:0.884rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)">Load</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+            <div><span class="lbl">Query type</span>
+              <select id="queryType" class="ctrl">
+                <option>A</option><option>AAAA</option><option>CNAME</option>
+                <option>MX</option><option>TXT</option><option>NS</option>
+                <option>PTR</option><option selected>ANY</option>
+              </select>
+            </div>
+            <div><span class="lbl">Workers</span><input id="concurrency" type="number" class="ctrl" placeholder="Auto" min="1" max="1000"></div>
+            <div id="pipelineRow"><span class="lbl" title="UDP in-flight query depth per worker">Queue</span><input id="pipeline" type="number" class="ctrl" placeholder="Auto" min="1" max="512"></div>
+          </div>
+
+          <div class="seg" style="margin-bottom:10px">
+            <input type="radio" name="limitMode" id="modeCount" value="count">
+            <label for="modeCount">Count</label>
+            <input type="radio" name="limitMode" id="modeDuration" value="duration" checked>
+            <label for="modeDuration">Duration</label>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+            <div id="countRow" style="display:none"><span class="lbl">Reps per worker</span><input id="count" type="number" class="ctrl" value="100" min="1"></div>
+            <div id="durationRow"><span class="lbl">Duration</span><input id="duration" type="text" class="ctrl" value="30s" placeholder="30s  2m  1h"></div>
+            <div><span class="lbl" title="0 = unlimited">Rate limit <span style="text-transform:none;font-weight:400;opacity:.7">(q/s)</span></span><input id="rateLimit" type="number" class="ctrl" value="0" min="0"></div>
+          </div>
+
+          <!-- Options + run pushed to bottom -->
+          <div style="height:1px;background:var(--border);margin-bottom:14px"></div>
+          <div class="check-row" style="margin-bottom:12px">
+            <label class="check"><input type="checkbox" id="recurse" checked> Recursion</label>
+            <label class="check"><input type="checkbox" id="insecure" checked> Skip TLS verify</label>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="btnRun" class="run-btn" onclick="startBench()"><i class="bi bi-play-fill" style="margin-right:6px"></i>Run Benchmark</button>
+            <button id="btnStop" class="run-btn stop-btn" style="display:none;width:auto;padding:0 20px" onclick="stopBench()"><i class="bi bi-stop-fill" style="margin-right:4px"></i>Stop</button>
+          </div>
+
+        </div>
+
+        <!-- RIGHT: query targets -->
+        <div style="padding:16px 18px;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <div style="font-size:0.884rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Query targets</div>
+          </div>
+          <textarea id="queryDomains" style="flex:1;min-height:400px;width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--code-fg);padding:9px 10px;resize:none;outline:none;line-height:1.7;font-family:'Cascadia Code','Fira Mono',monospace;font-size:0.936rem" placeholder="One domain per line"></textarea>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Terminal -->
+    <div class="term-wrap">
+      <div class="term-bar">
+        <span class="term-bar-title">output</span>
+        <div class="term-bar-actions">
+          <span id="jobStatus" style="font-size:0.884rem;padding:2px 8px;border-radius:3px;
+                background:var(--bg3);color:var(--muted);font-weight:500">idle</span>
+          <button onclick="copyTerminal(this)" title="Copy output"
+                  style="background:none;border:none;color:var(--muted);cursor:pointer;
+                         font-size:1.04rem;padding:0;line-height:1;margin-left:6px">
+            <i class="bi bi-clipboard"></i>
+          </button>
+          <button onclick="clearTerminal()" title="Clear"
+                  style="background:none;border:none;color:var(--muted);cursor:pointer;
+                         font-size:1.04rem;padding:0;line-height:1;margin-left:6px">
+            <i class="bi bi-trash"></i>
+          </button>
+        </div>
+      </div>
+      <div id="terminal"><span class="term-dim">Ready.</span></div>
+    </div>
+
+  </div>
+
+  <!-- History -->
+  <div id="page-history" class="page">
+    <div style="margin-bottom:20px">
+      <h1 style="font-size:1.859rem;font-weight:600;color:var(--text);margin:0 0 2px"><i class="bi bi-list-check text-primary me-2"></i>Results</h1>
+      <p style="font-size:1.014rem;color:var(--muted);margin:0">Benchmark results. Select two or more to compare.</p>
+    </div>
+    <div class="d-flex align-items-center justify-content-between mb-1">
+      <h5 class="fw-bold mb-0" style="display:none"></h5>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-primary d-none" id="btnCompare" onclick="compareSelected()">
+          <i class="bi bi-bar-chart me-1"></i>Compare
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="btnExport" onclick="exportHistoryCSV()">
+          <i class="bi bi-download me-1"></i>Export CSV
+        </button>
+        <button class="btn btn-sm btn-outline-danger" id="btnClear" onclick="clearHistory()">
+          <i class="bi bi-trash me-1"></i>Clear
+        </button>
+      </div>
+    </div>
+    <p class="text-muted small mb-3">Select runs to compare. Stored across sessions.</p>
+    <div id="compareChart" class="d-none mb-3" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <span style="font-size:1.066rem;font-weight:500;color:var(--text)">Comparison</span>
+        <button onclick="closeCompare()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.17rem;padding:0;line-height:1"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div style="font-size:0.884rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Throughput</div>
+      <div style="position:relative;width:100%;height:160px;margin-bottom:20px">
+        <canvas id="compareQpsCanvas" role="img" aria-label="Bar chart of throughput per run"></canvas>
+      </div>
+      <div style="font-size:0.884rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">p95 latency</div>
+      <div style="position:relative;width:100%;height:130px">
+        <canvas id="compareP95Canvas" role="img" aria-label="Line chart of p95 latency per run"></canvas>
+      </div>
+    </div>
+    <div style="display:flex;gap:16px;padding:6px 2px 10px;font-size:0.884rem;color:var(--muted);flex-wrap:wrap">
+      <span style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--term-ok)"></span>p95 &lt;20ms · errors &lt;0.1%</span>
+      <span style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24"></span>p95 20–50ms · errors 0.1–1%</span>
+      <span style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--term-err)"></span>p95 &gt;50ms · errors &gt;1%</span>
+    </div>
+    <div id="historyList"><p class="text-muted">No runs yet.</p></div>
+  </div>
+
+  <!-- Schedules -->
+  <div id="page-schedules" class="page">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h1 style="font-size:1.859rem;font-weight:600;color:var(--text);margin:0 0 2px">
+          <i class="bi bi-calendar-check text-primary me-2"></i>Schedules
+        </h1>
+        <p style="font-size:1.014rem;color:var(--muted);margin:0">Run DNS benchmarks automatically on a schedule.</p>
+      </div>
+      <button class="run-btn" style="width:auto;padding:8px 18px;font-size:1.014rem"
+              onclick="openSchedModal()">
+        <i class="bi bi-plus-lg me-1"></i> Add Schedule
+      </button>
+    </div>
+
+    <!-- Bulk action bar (hidden until rows selected) -->
+    <div id="schedBulkBar" style="display:none;background:var(--bg2);border:1px solid var(--border);
+         border-radius:6px;padding:10px 14px;margin-bottom:10px;
+         align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-sm btn-outline-primary"   onclick="schedRunNow()"><i class="bi bi-play-fill me-1"></i>Run Now</button>
+      <button class="btn btn-sm btn-outline-secondary" id="schedEditBtn" onclick="schedEditSelected()"><i class="bi bi-pencil me-1"></i>Edit</button>
+      <button class="btn btn-sm btn-outline-warning"   id="schedPauseBtn" onclick="schedPauseResume()">Pause</button>
+      <button class="btn btn-sm btn-outline-danger"    onclick="schedDeleteSelected()"><i class="bi bi-trash me-1"></i>Delete</button>
+    </div>
+
+    <div id="scheduleList"><p class="text-muted">Loading schedules…</p></div>
+  </div>
+
+  <!-- Add / Edit Schedule modal -->
+  <div class="modal fade" id="schedModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content" style="background:var(--bg2);border:1px solid var(--border);border-radius:10px">
+        <div class="modal-header" style="border-color:var(--border)">
+          <h5 class="modal-title fw-bold" id="schedModalTitle">Add Schedule</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="schedId">
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+            <div class="block">
+              <span class="lbl">Name <span style="font-size:.8em;color:var(--muted)">(optional label)</span></span>
+              <input id="schedName" class="ctrl" type="text" placeholder="e.g. Nightly UDP test">
+            </div>
+            <div class="block">
+              <span class="lbl">Server</span>
+              <input id="schedServer" class="ctrl" type="text" placeholder="127.0.0.1">
+            </div>
+          </div>
+
+          <!-- Row 1: Protocol / Query Type / Recursive -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+            <div class="block">
+              <span class="lbl">Protocol</span>
+              <select id="schedProtocol" class="ctrl">
+                <option value="udp">UDP</option>
+                <option value="tcp">TCP</option>
+                <option value="dot">DoT</option>
+                <option value="doh">DoH</option>
+              </select>
+            </div>
+            <div class="block">
+              <span class="lbl">Query Type</span>
+              <select id="schedQtype" class="ctrl">
+                <option>A</option><option>AAAA</option><option>CNAME</option>
+                <option>MX</option><option>NS</option><option>TXT</option>
+                <option selected>ANY</option>
+              </select>
+            </div>
+            <div class="block" style="display:flex;align-items:center;gap:8px;margin-top:22px">
+              <label class="check">
+                <input type="checkbox" id="schedRecurse" checked>
+                <span>Recursive (RD bit)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Row 2: Workers / Queue / Duration -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+            <div class="block">
+              <span class="lbl">Workers</span>
+              <input id="schedConcurrency" class="ctrl" type="number" min="1" max="1000" placeholder="Auto">
+            </div>
+            <div class="block">
+              <span class="lbl">Queue</span>
+              <input id="schedPipeline" class="ctrl" type="number" min="1" max="512" placeholder="Auto">
+            </div>
+            <div class="block">
+              <span class="lbl">Duration</span>
+              <input id="schedDuration" class="ctrl" type="text" placeholder="30s / 5m / 1h" value="30s">
+            </div>
+          </div>
+
+          <div class="block" style="margin-bottom:14px">
+            <span class="lbl">Queries <span style="font-size:.8em;color:var(--muted)">(one domain per line — blank = default list)</span></span>
+            <textarea id="schedQueries" class="ctrl" rows="4"
+                      style="resize:vertical;font-family:monospace;font-size:.92em"
+                      placeholder="google.com&#10;cloudflare.com&#10;github.com"></textarea>
+          </div>
+
+          <div style="height:1px;background:var(--border);margin-bottom:14px"></div>
+
+          <!-- ── Timing ─────────────────────────────────────────────── -->
+          <div style="margin-bottom:6px;font-size:.884rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Schedule</div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:4px" id="schedTimingRow">
+            <div class="block">
+              <span class="lbl">Frequency</span>
+              <select id="schedFreq" class="ctrl" onchange="onSchedFreqChange()">
+                <option value="hourly">Hourly</option>
+                <option value="daily" selected>Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="once">One-time</option>
+              </select>
+            </div>
+
+            <!-- Shown for weekly -->
+            <div class="block" id="schedWeekdayWrap" style="display:none">
+              <span class="lbl">Day of week</span>
+              <select id="schedWeekday" class="ctrl">
+                <option value="0">Sunday</option>
+                <option value="1" selected>Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+              </select>
+            </div>
+
+            <!-- Shown for monthly -->
+            <div class="block" id="schedMonthdayWrap" style="display:none">
+              <span class="lbl">Day of month</span>
+              <select id="schedMonthday" class="ctrl">
+                <!-- 1-28 always safe; 29-31 shown with note -->
+              </select>
+            </div>
+
+            <!-- Shown for hourly: which minute -->
+            <div class="block" id="schedMinuteWrap" style="display:none">
+              <span class="lbl">At minute</span>
+              <select id="schedMinute" class="ctrl">
+                <!-- populated by JS -->
+              </select>
+            </div>
+
+            <!-- Shown for daily/weekly/monthly: time of day -->
+            <div class="block" id="schedTimeWrap">
+              <span class="lbl">Time</span>
+              <div style="display:flex;gap:6px;align-items:center">
+                <select id="schedHour" class="ctrl" style="flex:1">
+                  <!-- 00-23 populated by JS -->
+                </select>
+                <span style="color:var(--muted);font-weight:600">:</span>
+                <select id="schedMin" class="ctrl" style="flex:1">
+                  <!-- 00/15/30/45 populated by JS -->
+                </select>
+              </div>
+            </div>
+
+            <!-- Shown for one-time -->
+            <div class="block" id="schedOneshotWrap" style="display:none">
+              <span class="lbl">Run at</span>
+              <input id="schedRunAt" class="ctrl" type="datetime-local">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-color:var(--border);justify-content:space-between">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="run-btn" style="width:auto;padding:8px 22px"
+                  onclick="saveSchedule()">Save Schedule</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ReadMe -->
+  <div id="page-readme" class="page">
+    <div style="margin-bottom:20px">
+      <h1 style="font-size:1.859rem;font-weight:600;color:var(--text);margin:0 0 2px">
+        <i class="bi bi-file-text text-primary me-2"></i>ReadMe
+      </h1>
+    </div>
+    <div id="readmeContent" style="color:var(--term-fg)">
+      <span class="spinner-border spinner-border-sm me-2"></span>Loading&hellip;
+    </div>
+  </div>
+
+  <!-- License -->
+  <div id="page-license" class="page">
+    <div style="margin-bottom:20px">
+      <h1 style="font-size:1.859rem;font-weight:600;color:var(--text);margin:0 0 2px">
+        <i class="bi bi-file-earmark-text text-primary me-2"></i>License
+      </h1>
+    </div>
+    <div id="licenseContent" style="color:var(--term-fg)">
+      <span class="spinner-border spinner-border-sm me-2"></span>Loading&hellip;
+    </div>
+  </div>
+
+</div><!-- /main-content -->
+
+<script>
+// ── Schedules ─────────────────────────────────────────────────────────────────
+let schedules = [];
+let selectedScheds = new Set();
+
+// ── Populate static select options on load ────────────────────────────────────
+(function initSchedSelects() {
+  // Hour select 00-23
+  const hourSel = document.getElementById('schedHour');
+  if (hourSel) {
+    for (let h = 0; h < 24; h++)
+      hourSel.innerHTML += `<option value="${h}">${String(h).padStart(2,'0')}</option>`;
+  }
+  // Minute select 00/15/30/45 (for time-of-day picker)
+  const minSel = document.getElementById('schedMin');
+  if (minSel) {
+    for (const m of [0,15,30,45])
+      minSel.innerHTML += `<option value="${m}">${String(m).padStart(2,'0')}</option>`;
+  }
+  // Hourly :MM select 0-55 by 5
+  const minuteSel = document.getElementById('schedMinute');
+  if (minuteSel) {
+    for (let m = 0; m < 60; m += 5)
+      minuteSel.innerHTML += `<option value="${m}">:${String(m).padStart(2,'0')}</option>`;
+  }
+  // Monthday 1-31
+  const mdSel = document.getElementById('schedMonthday');
+  if (mdSel) {
+    for (let d = 1; d <= 28; d++)
+      mdSel.innerHTML += `<option value="${d}">${d}</option>`;
+    mdSel.innerHTML += `<option value="29">29 (skipped in short months)</option>`;
+    mdSel.innerHTML += `<option value="30">30 (skipped in short months)</option>`;
+    mdSel.innerHTML += `<option value="31">31 (last day of long months)</option>`;
+  }
+})();
+
+function onSchedFreqChange() {
+  const freq = document.getElementById('schedFreq').value;
+  document.getElementById('schedWeekdayWrap') .style.display = freq === 'weekly'  ? '' : 'none';
+  document.getElementById('schedMonthdayWrap').style.display = freq === 'monthly' ? '' : 'none';
+  document.getElementById('schedMinuteWrap')  .style.display = freq === 'hourly'  ? '' : 'none';
+  document.getElementById('schedTimeWrap')    .style.display = freq === 'once' || freq === 'hourly' ? 'none' : '';
+  document.getElementById('schedOneshotWrap') .style.display = freq === 'once'    ? '' : 'none';
+  if (freq === 'once' && !document.getElementById('schedRunAt').value) {
+    const dt = new Date(Date.now() + 3600000);
+    const pad = n => String(n).padStart(2,'0');
+    document.getElementById('schedRunAt').value =
+      `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  }
+}
+
+async function loadSchedules() {
+  try {
+    const r = await fetch('/api/schedules');
+    if (!r.ok) return;
+    const d = await r.json();
+    schedules = d.schedules || [];
+    renderSchedules();
+  } catch(e) {}
+}
+
+function renderSchedules() {
+  const el = document.getElementById('scheduleList');
+  if (!schedules.length) {
+    el.innerHTML = '<p style="color:var(--muted)">No schedules yet. Click <strong>Add Schedule</strong> to create one.</p>';
+    updateSchedBulkBar();
+    return;
+  }
+  const fmtTs = iso => {
+    if (!iso || iso === 'null') return '—';
+    try { return new Date(iso).toLocaleString(); } catch(e) { return iso; }
+  };
+  el.innerHTML = schedules.map(s => {
+    const checked = selectedScheds.has(s.id) ? 'checked' : '';
+    const bg = selectedScheds.has(s.id) ? 'background:rgba(79,124,255,.06);' : '';
+    const once = s.freq === 'once';
+    const badgeCol = once ? '#a855f7' : 'var(--accent)';
+    const typeBadge = timingLabel(s);
+    const lastOkHtml = s.last_ok == null
+      ? ''
+      : s.last_ok
+        ? '<span style="color:var(--term-ok);font-size:.875rem"><i class="bi bi-check-circle-fill me-1"></i>OK</span>'
+        : '<span style="color:var(--term-err);font-size:.875rem"><i class="bi bi-x-circle-fill me-1"></i>Failed</span>';
+    const pausedBadge = s.paused
+      ? '<span style="color:var(--term-warn);font-size:.82rem;margin-left:8px"><i class="bi bi-pause-circle me-1"></i>Paused</span>'
+      : '';
+    return `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+                padding:13px 16px;margin-bottom:10px;cursor:pointer;${bg}${s.paused?'opacity:.7':''}
+                display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center"
+         onclick="if(event.target.tagName!=='INPUT')schedToggle('${esc(s.id)}')">
+      <input type="checkbox" class="sched-cb" data-id="${esc(s.id)}" ${checked}
+             onchange="schedCbChange(this)"
+             style="accent-color:var(--accent);width:14px;height:14px;cursor:pointer">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+          <span style="font-weight:600;color:var(--text)">${esc(s.name || s.server)}</span>
+          <span style="font-size:.8rem;padding:2px 7px;border-radius:10px;
+                       background:rgba(79,124,255,.12);color:${badgeCol}">${esc(typeBadge)}</span>
+          ${pausedBadge}${lastOkHtml}
+        </div>
+        <div style="font-size:.88rem;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap">
+          <span><i class="bi bi-hdd-network me-1"></i>${esc(s.server)}</span>
+          <span><i class="bi bi-shuffle me-1"></i>${esc(s.protocol.toUpperCase())} · ${esc(s.qtype)} · ${esc(s.concurrency)} workers · ${esc(s.duration)}</span>
+          <span><i class="bi bi-clock me-1"></i>Next: ${fmtTs(s.next_run)}</span>
+          ${s.last_run ? `<span><i class="bi bi-check2 me-1"></i>Last: ${fmtTs(s.last_run)}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  updateSchedBulkBar();
+}
+
+function timingLabel(s) {
+  const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const hh = String(s.hour).padStart(2,'0');
+  const mm = String(s.minute).padStart(2,'0');
+  switch(s.freq) {
+    case 'hourly':  return `Hourly at :${mm}`;
+    case 'daily':   return `Daily at ${hh}:${mm}`;
+    case 'weekly':  return `Weekly: ${DAYS[s.weekday % 7]} at ${hh}:${mm}`;
+    case 'monthly': return `Monthly: day ${s.monthday} at ${hh}:${mm}`;
+    case 'once':    return `Once: ${s.next_run ? new Date(s.next_run).toLocaleString() : '?'}`;
+    default:        return s.freq;
+  }
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function schedCbChange(cb) {
+  if (cb.checked) selectedScheds.add(cb.dataset.id);
+  else selectedScheds.delete(cb.dataset.id);
+  const row = cb.closest('div[style]');
+  if (row) row.style.background = cb.checked ? 'rgba(79,124,255,.06)' : '';
+  updateSchedBulkBar();
+}
+
+function schedToggle(id) {
+  if (selectedScheds.has(id)) selectedScheds.delete(id);
+  else selectedScheds.add(id);
+  const cb = document.querySelector(`.sched-cb[data-id="${id}"]`);
+  if (cb) { cb.checked = selectedScheds.has(id); schedCbChange(cb); }
+}
+
+function updateSchedBulkBar() {
+  const bar = document.getElementById('schedBulkBar');
+  const n = selectedScheds.size;
+  if (n === 0) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  const editBtn = document.getElementById('schedEditBtn');
+  if (editBtn) { editBtn.disabled = n !== 1; editBtn.style.opacity = n === 1 ? '1' : '0.5'; }
+  const selected = schedules.filter(s => selectedScheds.has(s.id));
+  const allPaused = selected.every(s => s.paused);
+  const noPaused  = selected.every(s => !s.paused);
+  const pauseBtn = document.getElementById('schedPauseBtn');
+  if (pauseBtn) {
+    if (allPaused)     { pauseBtn.textContent = 'Resume'; pauseBtn._action = 'resume'; }
+    else if (noPaused) { pauseBtn.textContent = 'Pause';  pauseBtn._action = 'pause';  }
+    else               { pauseBtn.textContent = 'Pause/Resume'; pauseBtn._action = 'mixed'; }
+  }
+}
+
+async function schedRunNow() {
+  if (!selectedScheds.size) return;
+  for (const id of selectedScheds) {
+    const r = await fetch('/api/schedules/run', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})
+    });
+    const d = await r.json();
+    showSchedToast(d.ok ? `Started job ${d.job_id.slice(0,8)}…` : (d.error || 'Failed'),
+                   d.ok ? 'success' : 'danger');
+  }
+  await loadSchedules();
+}
+
+function schedEditSelected() {
+  if (selectedScheds.size !== 1) return;
+  const s = schedules.find(x => x.id === [...selectedScheds][0]);
+  if (s) openSchedModal(s);
+}
+
+async function schedPauseResume() {
+  const btn = document.getElementById('schedPauseBtn');
+  if (btn._action === 'mixed') return;
+  const endpoint = btn._action === 'resume' ? '/api/schedules/resume' : '/api/schedules/pause';
+  await Promise.all([...selectedScheds].map(id =>
+    fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})})
+  ));
+  selectedScheds.clear();
+  await loadSchedules();
+}
+
+async function schedDeleteSelected() {
+  if (!selectedScheds.size) return;
+  if (!confirm(`Delete ${selectedScheds.size} schedule${selectedScheds.size > 1 ? 's' : ''}?`)) return;
+  await Promise.all([...selectedScheds].map(id =>
+    fetch('/api/schedules/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})})
+  ));
+  selectedScheds.clear();
+  await loadSchedules();
+}
+
+function openSchedModal(s) {
+  document.getElementById('schedModalTitle').textContent = s ? 'Edit Schedule' : 'Add Schedule';
+  document.getElementById('schedId').value        = s ? s.id : '';
+  document.getElementById('schedName').value      = s ? (s.name || '') : '';
+  document.getElementById('schedServer').value    = s ? s.server : '';
+  document.getElementById('schedProtocol').value  = s ? s.protocol : 'udp';
+  document.getElementById('schedConcurrency').value = s ? s.concurrency : '';
+  document.getElementById('schedPipeline').value  = s ? s.pipeline : '';
+  document.getElementById('schedDuration').value  = s ? s.duration : '30s';
+  document.getElementById('schedQtype').value     = s ? s.qtype : 'ANY';
+  document.getElementById('schedRecurse').checked = s ? s.recurse : true;
+  document.getElementById('schedQueries').value   = s ? (s.queries || '').replace(/\\n/g, '\n') : '';
+  document.getElementById('schedFreq').value      = s ? s.freq : 'daily';
+  document.getElementById('schedWeekday').value   = s ? String(s.weekday) : '1';
+  document.getElementById('schedMonthday').value  = s ? String(s.monthday) : '1';
+  document.getElementById('schedHour').value      = s ? String(s.hour) : '2';
+  document.getElementById('schedMin').value       = s ? String(s.minute) : '0';
+  document.getElementById('schedMinute').value    = s ? String(s.minute) : '0';
+  if (s && s.freq === 'once' && s.next_run) {
+    try {
+      const dt = new Date(s.next_run);
+      const pad = n => String(n).padStart(2,'0');
+      document.getElementById('schedRunAt').value =
+        `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    } catch(e) {}
+  } else {
+    document.getElementById('schedRunAt').value = '';
+  }
+  onSchedFreqChange();
+  new bootstrap.Modal(document.getElementById('schedModal')).show();
+}
+
+async function saveSchedule() {
+  const id   = document.getElementById('schedId').value;
+  const freq = document.getElementById('schedFreq').value;
+  // Pick minute from the right control depending on freq
+  const minute = freq === 'hourly'
+    ? parseInt(document.getElementById('schedMinute').value)
+    : parseInt(document.getElementById('schedMin').value);
+  const payload = {
+    id:          id || undefined,
+    name:        document.getElementById('schedName').value.trim(),
+    server:      document.getElementById('schedServer').value.trim(),
+    protocol:    document.getElementById('schedProtocol').value,
+    concurrency: document.getElementById('schedConcurrency').value,
+    pipeline:    document.getElementById('schedPipeline').value,
+    duration:    document.getElementById('schedDuration').value.trim(),
+    qtype:       document.getElementById('schedQtype').value,
+    recurse:     document.getElementById('schedRecurse').checked ? 'true' : 'false',
+    queries:     document.getElementById('schedQueries').value.trim(),
+    freq,
+    hour:     String(parseInt(document.getElementById('schedHour').value) || 0),
+    minute:   String(minute),
+    weekday:  document.getElementById('schedWeekday').value,
+    monthday: document.getElementById('schedMonthday').value,
+  };
+  if (!payload.server) { showSchedToast('Server address is required', 'danger'); return; }
+  if (freq === 'once') {
+    const runAt = document.getElementById('schedRunAt').value;
+    if (!runAt) { showSchedToast('Pick a date and time for the one-time run', 'danger'); return; }
+    payload.run_at = runAt;  // bare "YYYY-MM-DDTHH:MM", interpreted as server local time
+  }
+  const endpoint = id ? '/api/schedules/update' : '/api/schedules/add';
+  const r = await fetch(endpoint, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+  });
+  const d = await r.json();
+  if (d.ok) {
+    bootstrap.Modal.getInstance(document.getElementById('schedModal'))?.hide();
+    await loadSchedules();
+    showSchedToast('Schedule saved', 'success');
+  } else {
+    showSchedToast(d.error || 'Failed to save', 'danger');
+  }
+}
+
+function showSchedToast(msg, type) {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;padding:10px 18px;' +
+    'border-radius:7px;font-size:.975rem;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,.35);' +
+    'background:var(--bg2);border:1px solid var(--border);color:var(--text)';
+  el.innerHTML = (type === 'success'
+    ? '<i class="bi bi-check-circle-fill me-2" style="color:var(--term-ok)"></i>'
+    : '<i class="bi bi-x-circle-fill me-2" style="color:var(--term-err)"></i>') + msg;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; }, 3000);
+  setTimeout(() => el.remove(), 3400);
+}
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// ── Schedules (needs Bootstrap, so lives after bootstrap.bundle) ──────────────
+// HTML-escape helper — always use for user/server-supplied values in innerHTML
+function esc(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+
+function showPage(name,link){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-link').forEach(l=>l.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  if(link) link.classList.add('active');
+  if(name==='schedules') loadSchedules();
+  if(name==='history') { syncSchedulerHistory().then(renderHistory); }
+  if(name==='readme')  loadDocPage('readme',  'readmeContent');
+  if(name==='license') loadDocPage('license', 'licenseContent');
+}
+
+const PL={udp:'UDP',tcp:'TCP',dot:'DoT',doh:'DoH'};
+
+// Workers field: empty = auto (server CPU threads − 1, capped at 32),
+// any number = explicit user override (persisted in localStorage).
+// Clear the field to go back to auto.
+// The CPU count is injected by the server at HTML render time, so this
+// is fully synchronous and doesn't depend on any async API call landing.
+const SERVER_CPU_THREADS = __SERVER_CPU_THREADS__;
+const SAVED_WORKERS_KEY = 'dnsbench-saved-workers';
+const _autoWorkers = Math.max(1, Math.min(32, SERVER_CPU_THREADS - 1));
+
+(function initWorkersField(){
+  const el = document.getElementById('concurrency');
+  if (!el) return;
+  el.placeholder = `Auto: ${_autoWorkers}`;
+  // Restore user override from localStorage, if they set one previously
+  try {
+    const saved = localStorage.getItem(SAVED_WORKERS_KEY);
+    if (saved && saved.trim() !== '') el.value = saved;
+  } catch(e) {}
+  // Persist on every keystroke; empty value clears it (= back to auto)
+  el.addEventListener('input', function(){
+    try {
+      if (el.value.trim() === '') localStorage.removeItem(SAVED_WORKERS_KEY);
+      else localStorage.setItem(SAVED_WORKERS_KEY, el.value);
+    } catch(e) {}
+  });
+})();
+
+// Resolve whatever the user wants right now: their value if set, otherwise auto.
+function effectiveWorkers(){
+  const el = document.getElementById('concurrency');
+  const v = (el && el.value.trim()) || '';
+  return v === '' ? String(_autoWorkers) : v;
+}
+
+// Queue field: same pattern as Workers, but auto = 2 × CPU threads (capped at 64).
+// The cap matches the workers cap (32) × queue cap (64) = ~2048 max concurrent
+// in-flight queries, comfortably under the Linux default UDP recv buffer. Beyond
+// that you stop measuring the server and start measuring your own kernel.
+// Manual override can still go up to the input max (512).
+const SAVED_QUEUE_KEY = 'dnsbench-saved-queue';
+const _autoQueue = Math.max(1, Math.min(64, SERVER_CPU_THREADS * 2));
+
+(function initQueueField(){
+  const el = document.getElementById('pipeline');
+  if (!el) return;
+  el.placeholder = `Auto: ${_autoQueue}`;
+  try {
+    const saved = localStorage.getItem(SAVED_QUEUE_KEY);
+    if (saved && saved.trim() !== '') el.value = saved;
+  } catch(e) {}
+  el.addEventListener('input', function(){
+    try {
+      if (el.value.trim() === '') localStorage.removeItem(SAVED_QUEUE_KEY);
+      else localStorage.setItem(SAVED_QUEUE_KEY, el.value);
+    } catch(e) {}
+  });
+})();
+
+function effectiveQueue(){
+  const el = document.getElementById('pipeline');
+  const v = (el && el.value.trim()) || '';
+  return v === '' ? String(_autoQueue) : v;
+}
+
+function nodeValue(name){ return name; }
+
+let _serverNodes=[];
+let _selectedServers=new Set();
+
+// ── Saved servers (localStorage, survive reboots) ─────────────────────────
+const SAVED_SERVERS_KEY='dnsbench-saved-servers';
+function loadSavedServers(){
+  try{ return JSON.parse(localStorage.getItem(SAVED_SERVERS_KEY)||'[]'); }
+  catch(e){ return []; }
+}
+function persistSavedServers(list){
+  try{ localStorage.setItem(SAVED_SERVERS_KEY, JSON.stringify(list)); }catch(e){}
+}
+function saveServerIfNew(serverStr){
+  // Save each comma-separated server that isn't already in the list
+  const names=serverStr.split(',').map(s=>s.trim()).filter(Boolean);
+  const saved=loadSavedServers();
+  const listed=new Set(_serverNodes.map(n=>n.name));
+  let changed=false;
+  names.forEach(name=>{
+    if(!listed.has(name) && !saved.includes(name)){
+      saved.push(name);
+      changed=true;
+    }
+  });
+  if(changed){
+    persistSavedServers(saved);
+    mergeSavedServers();
+  }
+}
+function removeSavedServer(name){
+  const saved=loadSavedServers().filter(s=>s!==name);
+  persistSavedServers(saved);
+  mergeSavedServers();
+  buildServerListItems('');
+}
+function mergeSavedServers(){
+  // Rebuild the dropdown list from the saved servers
+  const listed=new Set(_serverNodes.filter(n=>n._saved!==true).map(n=>n.name));
+  const base=_serverNodes.filter(n=>!n._saved);
+  const saved=loadSavedServers();
+  const extras=saved.filter(s=>!listed.has(s)).map(s=>({name:s,state:'saved',_saved:true}));
+  _serverNodes=[...base,...extras];
+}
+
+function getSelectedServers(){
+  return Array.from(_selectedServers);
+}
+
+function syncServerInput(){
+  const inp=document.getElementById('server');
+  if(inp) inp.value=Array.from(_selectedServers).join(', ');
+}
+
+function buildServerListItems(filter){
+  const list=document.getElementById('serverList');
+  if(!list) return;
+  const f=(filter||'').toLowerCase();
+  const items=_serverNodes.filter(n=>!f||n.name.toLowerCase().includes(f));
+  if(!items.length){list.style.display='none';return;}
+  list.innerHTML='';
+  items.forEach(n=>{
+    const val=nodeValue(n.name);
+    const isSelf=n.state==='Self';
+    const selected=_selectedServers.has(val);
+    const div=document.createElement('div');
+    div.dataset.val=val;
+    div.style.cssText='padding:7px 12px;cursor:pointer;font-size:1.066rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);'
+      +(selected?'background:rgba(79,124,255,.15);':'');
+    const removeBtn=n._saved
+      ?'<span onmousedown="event.stopPropagation();removeSavedServer('+JSON.stringify(n.name)+')" '
+        +'style="margin-left:8px;color:var(--muted);cursor:pointer;font-size:0.91rem;line-height:1;padding:0 2px" '
+        +'title="Remove saved server">×</span>'
+      :'';
+    div.innerHTML='<span style="font-family:monospace;display:flex;align-items:center;gap:6px">'
+      +(selected?'<span style="color:var(--accent-text);font-size:0.91rem">✓</span>':'<span style="font-size:0.91rem;opacity:0">✓</span>')
+      +(isSelf?'<span style="color:var(--accent-text)">★</span>':'')
+      +esc(n.name)+'</span>'
+      +'<span style="display:flex;align-items:center;font-size:0.91rem;color:var(--muted)">'+esc(n.state||'')+removeBtn+'</span>';
+    div.onmouseenter=()=>{ if(!_selectedServers.has(val)) div.style.background='var(--bg3)'; };
+    div.onmouseleave=()=>{ if(!_selectedServers.has(val)) div.style.background=''; };
+    div.onmousedown=(e)=>{
+      e.preventDefault();
+      if(_selectedServers.has(val)){
+        _selectedServers.delete(val);
+      } else {
+        _selectedServers.add(val);
+      }
+      syncServerInput();
+      buildServerListItems(filter);
+    };
+    list.appendChild(div);
+  });
+  list.style.display='';
+}
+
+function showServerList(){
+  mergeSavedServers();
+  if(!_serverNodes.length) return;
+  buildServerListItems('');
+}
+
+function hideServerList(){
+  const list=document.getElementById('serverList');
+  if(list) list.style.display='none';
+}
+
+function toggleServerList(){
+  const list=document.getElementById('serverList');
+  if(!list) return;
+  if(list.style.display==='none'||!list.style.display){
+    document.getElementById('server').focus();
+    showServerList();
+  } else {
+    hideServerList();
+  }
+}
+
+function filterServerList(val){
+  mergeSavedServers();
+  if(!_serverNodes.length) return;
+  // If user is typing manually, clear multi-selection
+  _selectedServers.clear();
+  buildServerListItems(val);
+}
+
+function onProtocolChange(){
+  const proto=document.getElementById('protocol').value;
+  document.getElementById('dohExtras').style.display=proto==='doh'?'':'none';
+  const pr=document.getElementById('pipelineRow');
+  if(pr) pr.style.display=proto==='udp'?'':'none';
+}
+
+document.querySelectorAll('input[name="limitMode"]').forEach(r=>r.addEventListener('change',()=>{
+  const m=document.querySelector('input[name="limitMode"]:checked').value;
+  document.getElementById('countRow').style.display=m==='count'?'':'none';
+  document.getElementById('durationRow').style.display=m==='duration'?'':'none';
+  if(m==='duration'){const d=document.getElementById('duration');if(!d.value.trim())d.value='30s';}
+}));
+
+function loadQueryDomains(){
+  const saved=loadSavedQueries();
+  document.getElementById('queryDomains').value = saved || 'google.com\ncloudflare.com\ngithub.com';
+}
+
+// ── Saved query domains (localStorage, used when not loaded from server cache) ──
+const SAVED_QUERIES_KEY='dnsbench-saved-queries';
+function loadSavedQueries(){
+  try{ return localStorage.getItem(SAVED_QUERIES_KEY) || ''; }
+  catch(e){ return ''; }
+}
+function persistSavedQueries(text){
+  try{ localStorage.setItem(SAVED_QUERIES_KEY, text); }catch(e){}
+}
+// Persist user edits whenever the textarea is in non-cache mode.
+// Bound on `input` (fires per keystroke) so edits aren't lost if the user
+// starts a benchmark without blurring the textarea first.
+document.addEventListener('DOMContentLoaded',function(){
+  const ta=document.getElementById('queryDomains');
+  if(!ta) return;
+  ta.addEventListener('input',function(){
+    persistSavedQueries(ta.value);
+  });
+});
+
+const term=document.getElementById('terminal');
+const _TC={'§ok§':'term-ok','§hdr§':'term-hdr','§dim§':'term-dim','§warn§':'term-warn','§err§':'term-err','§rst§':'',
+           '§warn§':'term-warn','§err§':'term-err','§rst§':''};
+
+function termLine(text,cls=''){
+  const line=document.createElement('div');
+  line.style.cssText='white-space:pre-wrap;word-break:break-all;line-height:1.75';
+  if(text.includes('§')){
+    const parts=text.split(/(§[a-z]+§)/);
+    let cur='';
+    parts.forEach(p=>{
+      if(_TC[p]!==undefined){ cur=_TC[p]; }
+      else if(p){ const s=document.createElement('span'); s.className=cur; s.textContent=p; line.appendChild(s); }
+    });
+  } else {
+    if(!cls){
+      if(/errors=[1-9]|error[^s=]|failed|fatal/i.test(text)) cls='term-err';
+      else if(/warn|timeout/i.test(text)) cls='term-warn';
+    }
+    line.className=cls; line.textContent=text;
+  }
+  term.appendChild(line); term.scrollTop=term.scrollHeight;
+}
+function copyTerminal(){
+  const text=Array.from(term.querySelectorAll('div,span')).length
+    ? term.innerText
+    : term.textContent;
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn=term.closest('.term-wrap').querySelector('[title="Copy output"] i');
+    if(btn){btn.className='bi bi-clipboard-check';setTimeout(()=>btn.className='bi bi-clipboard',1500);}
+  }).catch(()=>{});
+}
+function clearTerminal(){term.innerHTML='';}
+
+let curJob=null, curEvt=null;
+
+const HISTORY_KEY='dnsbench-history';
+function loadHistory(){
+  try{
+    const raw=localStorage.getItem(HISTORY_KEY);
+    const runs=raw ? JSON.parse(raw) : [];
+    runs.forEach(r=>{ delete r._selected; });
+    return runs;
+  }catch(e){ return []; }
+}
+function saveHistory(h){
+  try{ localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(0,500))); }catch(e){}
+}
+const runHistory=loadHistory();
+
+function getArgs(){
+  const m=document.querySelector('input[name="limitMode"]:checked').value;
+  return{
+    server:       document.getElementById('server').value.trim(),
+    protocol:     document.getElementById('protocol').value,
+    query_type:   document.getElementById('queryType').value,
+    concurrency:  effectiveWorkers(),
+    count:        m==='count'    ? document.getElementById('count').value    : undefined,
+    duration:     m==='duration' ? document.getElementById('duration').value : undefined,
+    rate_limit:   document.getElementById('rateLimit').value,
+    pipeline:     effectiveQueue(),
+    recurse:      document.getElementById('recurse').checked?'true':'false',
+    insecure:     document.getElementById('insecure').checked?'true':'false',
+    doh_method:   document.getElementById('dohMethod').value,
+    doh_protocol: document.getElementById('dohProtocol').value,
+    queries:      document.getElementById('queryDomains').value.split('\n').map(s=>s.trim()).filter(Boolean).join('\n'),
+  };
+}
+
+// Render history only when the Results tab is actually visible.
+// With up to 500 entries the DOM rebuild takes ~200ms — fine when the user
+// is looking at it, wasteful noise when they're on the Benchmark tab.
+function renderHistoryIfVisible() {
+  if (document.getElementById('page-history').classList.contains('active')) {
+    syncSchedulerHistory().then(renderHistory);
+  }
+}
+
+// Run a single server against the given args; returns true if completed normally.
+async function runOneServer(args){
+  return new Promise(resolve=>{
+    const _now=new Date();
+    const run={id:null,args,started:_now.toISOString().replace('T',' ').slice(0,19),status:'running'};
+    runHistory.unshift(run); renderHistoryIfVisible();
+    const jobLines=[];
+
+    fetch('/api/start-job',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(args)})
+    .then(r=>r.json()).then(d=>{
+      if(!d.ok){
+        termLine('Error: '+d.error,'term-err');
+        run.status='error'; renderHistoryIfVisible();
+        resolve(false); return;
+      }
+      run.id=d.job_id; curJob=d.job_id;
+      curEvt=new EventSource(`/api/job/${d.job_id}/stream`);
+      curEvt.onmessage=e=>{
+        const msg=JSON.parse(e.data);
+        if(msg.line!==undefined){
+          termLine(msg.line);
+          jobLines.push(msg.line);
+        }
+        if(msg.done){
+          curEvt.close(); curEvt=null; curJob=null;
+          const ok=msg.status==='done';
+          run.status=msg.status;
+          run.stats=parseStats(jobLines);
+          run.output=jobLines;
+          saveHistory(runHistory);
+          renderHistoryIfVisible();
+          resolve(ok);
+        }
+      };
+      curEvt.onerror=()=>{
+        curEvt&&curEvt.close(); curEvt=null;
+        fetch(`/api/job/${run.id}`).then(r=>r.json()).then(d=>{
+          const ok=d.status==='done';
+          run.status=d.status||'error';
+          run.stats=parseStats(jobLines);
+          run.output=jobLines.slice();
+          saveHistory(runHistory); renderHistoryIfVisible();
+          if(!ok) termLine('Stream error.','term-err');
+          curJob=null; resolve(ok);
+        }).catch(()=>{
+          termLine('Stream error.','term-err');
+          run.status='error'; run.stats=parseStats(jobLines);
+          run.output=jobLines.slice();
+          saveHistory(runHistory); renderHistoryIfVisible();
+          curJob=null; resolve(false);
+        });
+      };
+    }).catch(e=>{
+      termLine('Error: '+e.message,'term-err');
+      run.status='error'; renderHistoryIfVisible();
+      resolve(false);
+    });
+  });
+}
+
+async function startBench(){
+  if(curJob) return;
+  clearTerminal(); setStatus('starting','primary');
+  const args=getArgs();
+
+  // Parse comma-separated servers
+  const servers=args.server.split(',').map(s=>s.trim()).filter(Boolean);
+  if(!servers.length){ termLine('Error: no server specified','term-err'); setStatus('error','danger'); return; }
+  // Remember any manually-entered servers
+  saveServerIfNew(args.server);
+
+  document.getElementById('btnRun').style.display='none';
+  document.getElementById('btnStop').style.display='';
+
+  const total=servers.length;
+  for(let i=0;i<servers.length;i++){
+    if(document.getElementById('btnStop').style.display==='none')break; // stopped
+    const server=servers[i];
+    const serverArgs={...args,server};
+    if(total>1){
+      termLine('');
+      termLine(`▶ [${args.protocol.toUpperCase()}] → ${server}  (${i+1}/${total})`,'term-hdr');
+    } else {
+      termLine(`▶ [${args.protocol.toUpperCase()}] → ${server}`,'term-hdr');
+    }
+    setStatus(total>1?`running ${i+1}/${total}`:'running','primary');
+    const ok=await runOneServer(serverArgs);
+    if(!ok && curJob===null){
+      // was killed — stop the queue
+      break;
+    }
+  }
+
+  setStatus(total>1?'done':'done','success');
+  document.getElementById('btnRun').style.display='';
+  document.getElementById('btnStop').style.display='none';
+}
+
+async function stopBench(){
+  if(curJob) await fetch(`/api/job/${curJob}/kill`,{method:'POST'});
+}
+
+function setArgs(args){
+  // Populate every form field from a saved args object, then trigger
+  // dependent UI updates so the form reflects the restored state exactly.
+  if(args.server    !== undefined) document.getElementById('server').value       = args.server;
+  if(args.protocol  !== undefined) document.getElementById('protocol').value     = args.protocol;
+  if(args.query_type!== undefined) document.getElementById('queryType').value    = args.query_type;
+  if(args.concurrency!==undefined) document.getElementById('concurrency').value  = args.concurrency;
+  if(args.pipeline  !== undefined) document.getElementById('pipeline').value     = args.pipeline;
+  if(args.rate_limit!== undefined) document.getElementById('rateLimit').value    = args.rate_limit;
+  if(args.recurse   !== undefined) document.getElementById('recurse').checked    = args.recurse==='true';
+  if(args.insecure  !== undefined) document.getElementById('insecure').checked   = args.insecure==='true';
+  if(args.doh_method!== undefined) document.getElementById('dohMethod').value    = args.doh_method;
+  if(args.doh_protocol!==undefined)document.getElementById('dohProtocol').value  = args.doh_protocol;
+  if(args.queries   !== undefined) document.getElementById('queryDomains').value = args.queries;
+  // Set the count/duration radio and its paired input
+  if(args.duration !== undefined && args.duration !== null && args.duration !== ''){
+    document.getElementById('modeDuration').checked = true;
+    document.getElementById('duration').value = args.duration;
+  } else if(args.count !== undefined && args.count !== null && args.count !== ''){
+    document.getElementById('modeCount').checked = true;
+    document.getElementById('count').value = args.count;
+  }
+  // Trigger UI updates that depend on the restored values
+  onProtocolChange();
+  // Fire the limitMode change handler to show/hide count vs duration rows
+  const m=document.querySelector('input[name="limitMode"]:checked').value;
+  document.getElementById('countRow').style.display    = m==='count'    ? '' : 'none';
+  document.getElementById('durationRow').style.display = m==='duration' ? '' : 'none';
+}
+
+function redoJob(idx){
+  const r=runHistory[idx];
+  if(!r||!r.args) return;
+  // Populate the form with the saved args so the user can review or adjust
+  setArgs(r.args);
+  // Switch to the bench tab and focus the Run button — one click to go
+  showPage('bench', document.querySelector('.nav-link[onclick*="bench"]'));
+  document.getElementById('btnRun').focus();
+}
+
+function setStatus(t,c){
+  const el=document.getElementById('jobStatus');
+  el.textContent=t; el.className=`badge bg-${c}`;
+}
+
+function parseStats(lines){
+  const stats={};
+  for(const l of lines){
+    const plain=l.replace(/§[a-z]+§/g,"");
+    let m;
+    if(stats.qps==null&&(m=plain.match(/([0-9][0-9,.]+) q[/]s/i)))
+      stats.qps=parseFloat(m[1].replace(/,/g,""));
+    if(stats.sent==null&&(m=plain.match(/([0-9][0-9,.]+) sent/i)))
+      stats.sent=parseInt(m[1].replace(/,/g,""));
+    if(stats.errors==null&&(m=plain.match(/([0-9][0-9,.]*) errors/i)))
+      stats.errors=parseInt(m[1].replace(/,/g,""));
+    if(stats.p95==null&&(m=plain.match(/ p95 ([0-9][0-9.]*)/i)))
+      stats.p95=parseFloat(m[1]);
+  }
+  return stats;
+}
+
+let _compareChart=null;
+let _compareP95Chart=null;
+let _compareVisible={};
+
+function clearHistory(){
+  if(!runHistory.length) return;
+  const selected=runHistory.filter(r=>r._selected);
+  if(selected.length>0){
+    if(!confirm('Remove '+selected.length+' selected result'+(selected.length===1?'':'s')+'?')) return;
+    for(let i=runHistory.length-1;i>=0;i--){
+      if(runHistory[i]._selected) runHistory.splice(i,1);
+    }
+  } else {
+    if(!confirm('Clear all results?')) return;
+    runHistory.length=0;
+  }
+  saveHistory(runHistory);
+  closeCompare();
+  renderHistory();
+}
+
+function exportHistoryCSV(){
+  // If any rows are selected, export just those; otherwise export everything.
+  const selected=runHistory.filter(r=>r._selected);
+  const rows = selected.length>0 ? selected : runHistory;
+  if(!rows.length){
+    alert('No results to export.');
+    return;
+  }
+  const cols = ['timestamp','server','protocol','duration','concurrency','pipeline',
+                'qps','p95_ms','sent','errors','error_pct','status','note'];
+  const esc = v => {
+    if(v==null) return '';
+    const s = String(v);
+    return /[",\r\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  };
+  const lines = [cols.join(',')];
+  rows.forEach(r=>{
+    const a = r.args||{};
+    const s = r.stats||{};
+    const errPct = (s.sent && s.sent>0) ? (s.errors/s.sent*100).toFixed(4) : '';
+    lines.push([
+      r.started || '',
+      a.server || '',
+      a.mode || '',
+      a.duration || '',
+      a.concurrency || '',
+      a.pipeline || '',
+      s.qps!=null ? s.qps : '',
+      s.p95!=null ? s.p95 : '',
+      s.sent!=null ? s.sent : '',
+      s.errors!=null ? s.errors : '',
+      errPct,
+      r.status || '',
+      r.note || '',
+    ].map(esc).join(','));
+  });
+  const csv = lines.join('\r\n') + '\r\n';
+  // Filename: dnsbench-results-YYYYMMDD-HHMMSS.csv
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const fname = `dnsbench-results-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.csv`;
+  // Prepend BOM so Excel opens UTF-8 cleanly
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 0);
+}
+
+function updateToolbar(){
+  const selected=runHistory.filter(r=>r._selected);
+  const btnCompare=document.getElementById('btnCompare');
+  const btnClear=document.getElementById('btnClear');
+  btnCompare.classList.toggle('d-none', selected.length<2);
+  if(btnClear) btnClear.innerHTML=selected.length>0
+    ? '<i class="bi bi-trash me-1"></i>Remove selected ('+selected.length+')'
+    : '<i class="bi bi-trash me-1"></i>Clear';
+}
+
+function toggleSelect(idx){
+  runHistory[idx]._selected=!runHistory[idx]._selected;
+  updateToolbar();
+  renderHistory();
+}
+
+function compareSelected(){
+  const selected=runHistory.filter(r=>r._selected && r.stats);
+  if(selected.length<2) return;
+  const labels=selected.map(r=>[r.started, r.args.server.split(':')[0]+'/'+r.args.protocol.toUpperCase()]);
+  const qpsData=selected.map(r=>r.stats.qps||0);
+  const p95Data=selected.map(r=>r.stats.p95??null);
+  const errData=selected.map(r=>r.stats.errors||0);
+  const hasP95=p95Data.some(v=>v!=null);
+  const cs=getComputedStyle(document.documentElement);
+  const tok=n=>cs.getPropertyValue(n).trim();
+  const textColor=tok('--text');
+  const mutedColor=tok('--grid');
+  const bgColor=tok('--bg');
+  const blue='rgba(79,124,255,1)';
+  const yellow=tok('--warn');
+
+  Chart.defaults.color=textColor;
+  Chart.defaults.borderColor=mutedColor;
+  Chart.defaults.font.size=11;
+
+  if(_compareChart){ _compareChart.destroy(); _compareChart=null; }
+  if(_compareP95Chart){ _compareP95Chart.destroy(); _compareP95Chart=null; }
+
+  const bgPlugin={
+    id:'bg',
+    beforeDraw(chart){
+      const c=chart.canvas,cx=c.getContext('2d');
+      cx.save();cx.fillStyle=bgColor;cx.fillRect(0,0,c.width,c.height);cx.restore();
+    }
+  };
+
+  const errPlugin={
+    id:'errAnnotations',
+    afterDatasetsDraw(chart){
+      const cx=chart.ctx;
+      const meta=chart.getDatasetMeta(0);
+      selected.forEach((r,i)=>{
+        if(!r.stats||!r.stats.errors) return;
+        const bar=meta.data[i];
+        cx.save();
+        // Draw above the bar with a dark background for legibility
+        cx.font='bold 14px sans-serif';
+        cx.textAlign='center';
+        const label='⚠ '+r.stats.errors.toLocaleString();
+        const tw=cx.measureText(label).width;
+        const bx=bar.x;
+        // Pin to top of chart area with fixed margin, never inside the bar
+        const by=chart.chartArea.top+16;
+        cx.fillStyle=bgColor;
+        cx.fillRect(bx-tw/2-5, by-13, tw+10, 18);
+        cx.fillStyle='#f87171';
+        cx.fillText(label, bx, by);
+        cx.restore();
+      });
+    }
+  };
+
+  const sharedX={
+    ticks:{color:textColor,maxRotation:20,font:{size:14}},
+    grid:{color:mutedColor},border:{color:mutedColor}
+  };
+
+  _compareChart=new Chart(document.getElementById('compareQpsCanvas'),{
+    type:'bar',
+    plugins:[bgPlugin,errPlugin],
+    data:{
+      labels,
+      datasets:[{
+        data:qpsData,
+        backgroundColor:'rgba(79,124,255,0.8)',
+        borderColor:blue,borderWidth:1,borderRadius:3
+      }]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>{const l=items[0].label;return Array.isArray(l)?l:l.split(',');},label:ctx=>' '+ctx.parsed.y.toLocaleString()+' q/s',afterLabel:ctx=>{const r=selected[ctx.dataIndex];if(!r||!r.stats)return'';const e=r.stats.errors||0;const s=r.stats.sent||0;const pct=s>0?(e/s*100).toFixed(1):'0.0';return' '+e.toLocaleString()+' errors ('+pct+'%)';}}}},
+      scales:{
+        x:sharedX,
+        y:{
+          title:{display:true,text:'q/s',color:blue,font:{weight:'bold'}},
+          ticks:{color:blue,callback:v=>v>=1000?(v/1000).toFixed(0)+'k':v},
+          grid:{color:mutedColor},border:{color:mutedColor}
+        }
+      }
+    }
+  });
+
+  if(hasP95){
+    const p95RefPlugin={
+      id:'p95RefLines',
+      afterDraw(chart){
+        const {ctx,chartArea:{left,right,top,bottom},scales:{y}}=chart;
+        [{val:20,color:'#fbbf24',label:'20ms'},{val:50,color:'#f87171',label:'50ms'}].forEach(({val,color,label})=>{
+          const yp=y.getPixelForValue(val);
+          if(yp<top||yp>bottom) return;
+          ctx.save();
+          ctx.setLineDash([5,4]);
+          ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.globalAlpha=0.8;
+          ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();
+          ctx.setLineDash([]);ctx.globalAlpha=1;
+          ctx.fillStyle=color;ctx.font='bold 11px sans-serif';
+          ctx.textAlign='right';ctx.fillText(label,right-4,yp-4);
+          ctx.restore();
+        });
+      }
+    };
+    _compareP95Chart=new Chart(document.getElementById('compareP95Canvas'),{
+      type:'bar',
+      plugins:[bgPlugin,p95RefPlugin],
+      data:{
+        labels,
+        datasets:[{
+          data:p95Data,
+          backgroundColor:yellow,
+          borderRadius:4,
+          barPercentage:0.6
+        }]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>{const l=items[0].label;return Array.isArray(l)?l:l.split(',');},label:ctx=>' '+ctx.parsed.y.toFixed(1)+' ms'}}},
+        scales:{
+          x:sharedX,
+          y:{
+            min:0,
+            suggestedMax:Math.max(55,...p95Data.filter(v=>v!=null)),
+            title:{display:true,text:'ms',color:yellow,font:{weight:'bold'}},
+            ticks:{color:yellow,callback:v=>v+'ms'},
+            grid:{color:mutedColor},border:{color:mutedColor}
+          }
+        }
+      }
+    });
+  }
+
+  document.getElementById('compareChart').classList.remove('d-none');
+}
+
+function closeCompare(){
+  if(_compareChart){ _compareChart.destroy(); _compareChart=null; }
+  if(_compareP95Chart){ _compareP95Chart.destroy(); _compareP95Chart=null; }
+  _compareVisible={};
+  document.getElementById('compareChart').classList.add('d-none');
+  runHistory.forEach(r=>{ r._selected=false; });
+  document.getElementById('btnCompare').classList.add('d-none');
+  updateToolbar();
+  renderHistory();
+}
+
+function renderHistory(){
+  const el=document.getElementById('historyList');
+  if(!runHistory.length){el.innerHTML='<p style="color:var(--muted);font-size:1.066rem">No runs yet.</p>';return;}
+  el.innerHTML=runHistory.map((r,idx)=>{
+    const s=r.stats||{};
+    const sel=r._selected;
+    const hasStats=s.qps!=null;
+    const killed=r.status==='killed';
+    const running=r.status==='running';
+    const timeOnly=r.started||'';
+    const proto=(r.args?.protocol||'udp').toUpperCase();
+    const qtype=r.args?.query_type||'A';
+    const server=(r.args?.server||'').split(':')[0];
+    const workers=r.args?.concurrency||'?';
+    const reps=r.args?.duration?r.args.duration:(r.args?.count||'?')+' reps';
+    // Queue is UDP-only; suppress it for other protocols where it has no effect
+    const queueStr=(proto==='UDP' && r.args?.pipeline!=null)
+      ? `${esc(r.args.pipeline)} queue · `
+      : '';
+    const errPct=s.errors!=null&&s.sent!=null&&s.sent>0?(s.errors/s.sent*100):0;
+    const hasErrors=s.errors!=null&&s.errors>0;
+    const successPct=s.errors!=null&&s.sent!=null&&s.sent>0
+      ? (s.errors===0
+          ? '100'
+          : (() => {
+              const fixed = ((1 - s.errors/s.sent) * 100).toFixed(2);
+              // Don't show "100.00%" when there are still errors — collapse to "100"
+              return fixed === '100.00' ? '100' : fixed;
+            })())
+      : null;
+    const successColor=errPct===0?'var(--term-ok)':errPct<0.1?'var(--term-ok)':errPct<1?'#fbbf24':'var(--term-err)';
+    const errRateColor=errPct===0?'var(--term-ok)':errPct<0.1?'var(--term-ok)':errPct<1?'#fbbf24':'var(--term-err)';
+    const errRateStr=s.sent&&s.sent>0?(s.errors/s.sent*100).toFixed(2)+'%':'0.00%';
+    const p95Val=s.p95||0;
+    const p95Color=p95Val<20?'var(--term-ok)':p95Val<50?'#fbbf24':'var(--term-err)';
+
+    const border=sel?'2px solid #4f7cff':'0.5px solid var(--border)';
+
+    if(!hasStats){
+      return `<div style="background:var(--bg2);border:${border};border-radius:8px;padding:10px 14px;margin-bottom:6px;opacity:${killed?0.45:1}">
+        <div onclick="toggleSelect(${idx})" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+          <input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleSelect(${idx})" style="margin:0;flex-shrink:0">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="font-family:monospace;font-size:1.066rem;color:var(--text)">${esc(server)}</span>
+              <span style="font-size:0.91rem;padding:1px 6px;border-radius:4px;background:var(--bg3);color:var(--muted)">${esc(proto)}</span>
+              ${killed?'<span style="font-size:0.91rem;padding:1px 6px;border-radius:4px;background:rgba(251,191,36,.15);color:#fbbf24">killed</span>':''}
+              ${running?'<span style="font-size:0.91rem;padding:1px 6px;border-radius:4px;background:rgba(79,124,255,.15);color:#4f7cff">running</span>':''}
+            </div>
+            <div style="font-size:0.936rem;color:var(--muted)">${killed||running?'No stats':'No stats available'}</div>
+          </div>
+          <button class="run-out-btn" data-idx="${idx}" onclick="event.stopPropagation();toggleOutput(${idx})" title="Toggle output" style="display:none;background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1"><i class="bi bi-terminal" style="font-size:0.975rem"></i></button>
+          ${(!running&&r.args)?'<button onclick="event.stopPropagation();redoJob('+idx+')" title="Re-run this job" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1;flex-shrink:0"><i class="bi bi-arrow-clockwise" style="font-size:0.975rem"></i></button>':''}
+          <span style="font-size:0.936rem;color:var(--muted);flex-shrink:0">${esc(timeOnly)}</span>
+        </div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+          <input type="text" placeholder="Add a note…" value="${(r.note||'').replace(/"/g,'&quot;')}" onclick="event.stopPropagation()" onchange="saveNote(${idx},this.value)" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--muted);padding:4px 8px;font-size:0.936rem;outline:none;transition:.12s" onfocus="this.style.borderColor='var(--accent)';this.style.color='var(--text)'" onblur="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+        </div>
+        <div class="run-out-area" data-idx="${idx}"></div>
+      </div>`;
+    }
+
+    return `<div style="background:var(--bg2);border:${border};border-radius:8px;padding:10px 14px;margin-bottom:6px;">
+      <div onclick="toggleSelect(${idx})" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleSelect(${idx})" style="margin:0;flex-shrink:0">
+          <span style="font-family:monospace;font-size:1.066rem;font-weight:500;color:var(--text)">${esc(server)}</span>
+          <span style="font-size:0.91rem;padding:1px 6px;border-radius:4px;background:var(--bg3);color:var(--muted)">${esc(proto)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="run-out-btn" data-idx="${idx}" onclick="event.stopPropagation();toggleOutput(${idx})" title="Toggle output" style="display:none;background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1"><i class="bi bi-terminal" style="font-size:0.975rem"></i></button>
+          ${r.args?'<button onclick="event.stopPropagation();redoJob('+idx+')" title="Re-run this job" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1;flex-shrink:0"><i class="bi bi-arrow-clockwise" style="font-size:0.975rem"></i></button>':''}
+          <span style="font-size:0.936rem;color:var(--muted)">${esc(timeOnly)}</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:20px">
+        <div>
+          <div style="font-size:1.859rem;font-weight:500;color:#4f7cff;line-height:1">${s.qps!=null?s.qps.toLocaleString(undefined,{maximumFractionDigits:0}):'-'}</div>
+          <div style="font-size:0.884rem;color:var(--muted);margin-top:2px">q/s</div>
+        </div>
+        <div>
+          <div style="font-size:1.859rem;font-weight:500;color:${p95Color};line-height:1">${s.p95!=null?s.p95.toFixed(1)+'ms':'-'}</div>
+          <div style="font-size:0.884rem;color:var(--muted);margin-top:2px">p95</div>
+        </div>
+        <div>
+          <div style="font-size:1.859rem;font-weight:500;line-height:1;color:${successColor}">
+            ${successPct!=null?successPct+'%':'-'}
+          </div>
+          <div style="font-size:0.884rem;color:var(--muted);margin-top:2px">success</div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div style="font-size:0.936rem;color:var(--muted)">${esc(workers)} workers · ${queueStr}${esc(reps)}</div>
+          ${hasErrors
+            ?'<div style="font-size:0.936rem;margin-top:2px"><span style="color:var(--term-err)">'+s.errors.toLocaleString()+' errors</span> <span style="color:'+errRateColor+';font-weight:600">('+errRateStr+')</span></div>'
+            :'<div style="font-size:0.936rem;color:var(--term-ok);margin-top:2px">0 errors <span style="font-weight:600">(0.00%)</span></div>'}
+        </div>
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <input type="text" placeholder="Add a note…" value="${(r.note||'').replace(/"/g,'&quot;')}" onclick="event.stopPropagation()" onchange="saveNote(${idx},this.value)" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--muted);padding:4px 8px;font-size:0.936rem;outline:none;transition:.12s" onfocus="this.style.borderColor='var(--accent)';this.style.color='var(--text)'" onblur="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+      </div>
+      <div class="run-out-area" data-idx="${idx}"></div>
+    </div>`;
+  }).join('');
+  attachOutputs();
+}
+
+function onThemeChange(){
+  if(!document.getElementById('compareChart').classList.contains('d-none')){
+    compareSelected();
+  }
+}
+
+function saveNote(idx, value){
+  runHistory[idx].note = value.trim();
+  saveHistory(runHistory);
+}
+
+function toggleOutput(idx){
+  const el=document.getElementById('run-output-'+idx);
+  if(!el) return;
+  const visible=el.style.display!=='none';
+  el.style.display=visible?'none':'block';
+  const btn=document.getElementById('run-output-btn-'+idx);
+  if(btn) btn.innerHTML=visible
+    ?'<i class="bi bi-terminal" style="font-size:0.975rem"></i>'
+    :'<i class="bi bi-terminal-fill" style="font-size:0.975rem"></i>';
+}
+
+function buildOutputEl(lines){
+  const wrap=document.createElement('div');
+  wrap.style.cssText="background:var(--term-bg);border-radius:4px;padding:10px 12px;max-height:320px;overflow-y:auto;font-family:'Cascadia Code','Fira Mono',monospace;font-size:0.91rem;line-height:1.6;color:var(--term-fg)";
+  lines.forEach(text=>{
+    const row=document.createElement('div');
+    row.style.cssText='white-space:pre-wrap;word-break:break-all;line-height:1.6';
+    if(text.includes('§')){
+      const parts=text.split(/(§[a-z]+§)/);
+      let cur='';
+      parts.forEach(p=>{
+        if(_TC[p]!==undefined){ cur=_TC[p]; }
+        else if(p){ const s=document.createElement('span'); s.className=cur; s.textContent=p; row.appendChild(s); }
+      });
+    } else {
+      row.textContent=text;
+    }
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+function attachOutputs(){
+  runHistory.forEach((r,idx)=>{
+    if(!r.output||!r.output.length) return;
+    // show the toggle button
+    document.querySelectorAll('.run-out-btn[data-idx="'+idx+'"]').forEach(btn=>btn.style.display='');
+    // build and attach the output area (only if empty)
+    document.querySelectorAll('.run-out-area[data-idx="'+idx+'"]').forEach(area=>{
+      if(area.childElementCount) return;
+      const container=document.createElement('div');
+      container.id='run-output-'+idx;
+      container.style.cssText='display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)';
+      container.appendChild(buildOutputEl(r.output));
+      area.appendChild(container);
+    });
+  });
+}
+
+mergeSavedServers();
+onProtocolChange();
+renderHistory();
+loadQueryDomains();
+
+// ── Scheduler history sync ────────────────────────────────────────────────────
+const _syncedJobIds = new Set(runHistory.map(r => r.id).filter(Boolean));
+
+async function syncSchedulerHistory() {
+  try {
+    const d = await (await fetch('/api/scheduler-history')).json();
+    if (!d.ok) return;
+    let added = 0;
+    for (const run of (d.runs || [])) {
+      if (_syncedJobIds.has(run.job_id)) continue;
+      _syncedJobIds.add(run.job_id);
+      const stats = parseStats(run.lines || []);
+      runHistory.push({
+        id:      run.job_id,
+        args: {
+          server:      (run.args || {}).server      || '',
+          protocol:    (run.args || {}).protocol    || 'udp',
+          concurrency: (run.args || {}).concurrency || '?',
+          pipeline:    (run.args || {}).pipeline    || '?',
+          duration:    (run.args || {}).duration    || '',
+          query_type:  (run.args || {}).qtype       || 'A',
+        },
+        started: run.started || '',
+        status:  run.status  || 'done',
+        stats,
+        output:  run.lines   || [],
+        note:    'Scheduled' + (run.schedule_name ? ': ' + run.schedule_name : ''),
+      });
+      added++;
+    }
+    if (added > 0) {
+      runHistory.sort((a, b) => (b.started || '') < (a.started || '') ? -1 : 1);
+      saveHistory(runHistory);
+    }
+  } catch(e) {}
+}
+
+// ── Doc pages (ReadMe / License) ──────────────────────────────────────────────
+const _docCache = {};
+async function loadDocPage(name, elId) {
+  if (_docCache[name]) { document.getElementById(elId).innerHTML = _docCache[name]; return; }
+  try {
+    const d = await (await fetch('/api/' + name + '-html')).json();
+    if (d.ok) { _docCache[name] = d.html; document.getElementById(elId).innerHTML = d.html; }
+  } catch(e) { document.getElementById(elId).textContent = 'Failed to load.'; }
+}
+</script>
+</body>
+</html>

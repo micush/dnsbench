@@ -1,0 +1,14 @@
+# PAM service for dnsbench: how passwords are checked.
+#
+# This is plain Unix password authentication (the accounts in /etc/passwd and
+# /etc/shadow). Expired and locked accounts are refused. It deliberately avoids
+# the "login" stack, whose TTY checks cannot work for a daemon.
+#
+# Who may sign in is decided separately, by dnsbench itself: after PAM accepts a
+# password, the user must also be a member of the group named by LOGIN_GROUP in
+# /etc/dnsbench/dnsbench.conf (the group "dnsbench" by default).
+auth     required   pam_unix.so nodelay
+account  required   pam_unix.so
+#
+# For LDAP/SSSD/etc. replace the two lines above with your site's stack, e.g.
+# on Debian/Ubuntu:   @include common-auth   and   @include common-account
