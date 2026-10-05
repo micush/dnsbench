@@ -45,9 +45,13 @@ func (r result) text() string { return stripTags(strings.Join(r.lines, "\n")) }
 func runJobArgs(t *testing.T, a *App, args map[string]string) result {
 	t.Helper()
 	j := a.startJob(args, "test")
+	// A stopped Timer, not time.After: an abandoned time.After keeps running for the full 30 s,
+	// then fires during whichever later test is changing time.Local, which the race detector reports.
+	timeout := time.NewTimer(30 * time.Second)
+	defer timeout.Stop()
 	select {
 	case <-j.done:
-	case <-time.After(30 * time.Second):
+	case <-timeout.C:
 		j.kill()
 		t.Fatalf("job did not finish:\n%s", stripTags(strings.Join(j.allLines(), "\n")))
 	}
@@ -290,9 +294,11 @@ func TestKillStopsJobQuickly(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 	start := time.Now()
 	j.kill()
+	timeout := time.NewTimer(5 * time.Second) // stopped on return; see runJobArgs
+	defer timeout.Stop()
 	select {
 	case <-j.done:
-	case <-time.After(5 * time.Second):
+	case <-timeout.C:
 		t.Fatal("job still running 5s after kill")
 	}
 	if d := time.Since(start); d > 2*time.Second {

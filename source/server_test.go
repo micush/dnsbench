@@ -483,9 +483,11 @@ func TestKillOverHTTP(t *testing.T) {
 		t.Fatalf("kill: %v", k)
 	}
 	j := s.app.getJob(id)
+	timeout := time.NewTimer(5 * time.Second) // stopped on return, not left running
+	defer timeout.Stop()
 	select {
 	case <-j.done:
-	case <-time.After(5 * time.Second):
+	case <-timeout.C:
 		t.Fatal("job not stopped")
 	}
 	_, body := s.do(t, "GET", "/api/job/"+id, "", hdr)

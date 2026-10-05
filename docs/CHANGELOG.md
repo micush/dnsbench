@@ -1,5 +1,111 @@
 # Changelog
 
+## [v7] - 2026-10-05 — The comparison follows your ticks
+
+### Changed
+- **Once the comparison is open it updates itself.** Ticking a third or fourth result adds it to both pies and the legend, unticking removes it, and nobody has to press Compare again. Compare is only needed to open the panel the first time, so it steps aside while the panel is open.
+  - **Below two results** the panel hides itself rather than showing a one-slice "comparison", and it comes back on its own when you tick up to two again. The X closes it for good (and clears the ticks, as before); after that, ticking two results offers Compare again instead of reopening it.
+  - **A selected run whose numbers arrive later** (it was still running when ticked) is picked up the next time the list is drawn. The panel redraws only when the ticked runs or their numbers actually change, so an unrelated redraw of the list does not make the charts flicker.
+- **Each run keeps its colour while it stays ticked.** Colours used to be spread evenly over however many runs were ticked, so adding a run would have recoloured the others in a live view. Now a run holds a palette slot while ticked: the first ten are fixed (blue and orange first, as before), then golden-angle hues. An unticked run frees its slot and a newly ticked one takes the lowest free one.
+- The hint under Results says the comparison follows the selection. README bullet updated to match.
+
+### Fixed
+- **The race-detector run of `go test` failed intermittently, and did so on v3 as well.** Run against the unmodified v3 archive, `go test -race` failed in 6 of 12 runs (`TestNextRunDailyHourly`, `TestParseLocalTime`, `TestNextRunIsAlwaysStrictlyAfterNow`), so the clean race run reported for v3 was luck. The failures were a data race in the tests, not in the daemon: the time-zone tests replace the global `time.Local`, and a timer left over from an earlier test fired during them and read it (`time.Now()` inside `time.sendTime`).
+  - Three test helpers waited with `select { case <-job.done: case <-time.After(N): }`. When the job finished first, the `time.After` timer was never stopped, so it kept running for up to 30 s and fired inside the later scheduler tests. They now use a `time.Timer` that is stopped on return (`runJobArgs` and the kill test in `bench_test.go`, the stop test in `server_test.go`).
+  - `TestTLSConfigGeneratesReusesAndServes` started an accepting goroutine that could still be closing its TLS connection (which also reads `time.Local`) after the test returned. The test now waits for that goroutine.
+  - No test was weakened or removed; the assertions are unchanged.
+
+### Verified
+- Full release process on the final tree: `gofmt -l` (nothing), `go vet`, `go build -buildvcs=false`, `go test -race -count=1` (cgo), `CGO_ENABLED=0` vet and `go test -count=1` (the fail-closed path), cross-compile for linux/amd64, arm64, arm, 386, riscv64, ppc64le, s390x, loong64 and mips, mipsle, mips64, mips64le, and the 32-bit (386) test binary run for real; all from the extracted archive as well as the working tree.
+- `ui.js` against the real daemon (native amd64 cgo build, real PAM login with a throwaway user, UDP reflector alive before the run, fresh state directory) in Chromium, light and dark, every request outside the server refused (none attempted): all checks pass in both schemes. 14 new checks per scheme drive real clicks on the result checkboxes: no button or panel with one ticked, Compare appearing at two and opening the panel, the third and fourth ticks adding runs with no click, four distinct colours and a painted pie, an untick removing one while the others keep their colours, a re-ticked run taking the freed colour, the panel hiding below two and returning at two, the X closing it and clearing the ticks, and Compare (not an automatic panel) being offered again afterwards.
+- The race suite after the test fixes: `go test -race -count=1 ./...` passed 40 runs out of 40 in a row (15, then 25), against 6 failures in 12 on the unmodified v3 archive and 5 in 12 on this tree before the fixes.
+- Mutation check: with the redraw taken out of the list drawing, six of the new checks fail, including the ones that stay stuck on the original two runs; restored afterwards.
+- Screenshots of a two-run comparison and the same panel after ticking a third and fourth, including a run with errors.
+
+### Not verified
+- Firefox and Safari. Chromium only.
+- `startJob` in `server.go` has the same pattern as the test helpers (`case <-time.After(3 * time.Second)` while waiting for the job it just killed), so a 3 s timer can outlive the wait. It is harmless in the daemon and is not changed here, because `server.go` is in the area that calls for the full web-layer and PAM checks and nothing in this release touches it. In the tests it is the one remaining place a stray timer could fire late, and the race runs below did not hit it.
+- Nothing in the daemon's Go code, `install.sh`, `uninstall.sh` or the other files in `contrib/` changed (the Go changes are test files only, plus `contrib/uitest/ui.js`), so the 225k q/s performance check, the installer suite, the full PAM matrix and CodeQL were not re-run. The browser test did sign in through real PAM.
+
+## [v6] - 2026-10-05 — The best slice stands out on the comparison pies; Schedules actions move to a right-click menu
+
+### Added
+- **The winning slice is featured on each comparison pie.** On the throughput pie it is the run with the highest q/s; on the p95 pie it is the run with the *lowest* latency, so the smaller slice is the one pushed out there. A featured slice is shifted outward, drawn larger, outlined, given a glow and drawn on top, and carries a "BEST" label when it is wide enough to hold one; the others are slightly dimmed. The hover tooltip says "Highest throughput" or "Lowest p95". Nothing is featured when fewer than two runs have a value or when every run ties, because there is nothing to single out. The chart option is `winners: [index, ...]` on `DnsCharts.pie`; hover and hit-testing follow the shifted, larger shape.
+- **Right-click menu on schedules** with Edit, Duplicate, Run now, Pause (Resume when paused) and Delete.
+  - **Duplicate** opens the editor pre-filled from the schedule with no id and `(copy)` added to the name, so Save creates a new schedule and the original is untouched. It is a new item; the server API is unchanged (it uses `add`).
+  - The menu follows the keyboard: rows are focusable, the Menu key or Shift+F10 opens it at the row, arrows/Home/End move, Escape closes it and returns focus to the row. It also closes on a click elsewhere, a scroll, a resize, a window blur and when you leave the page. It is clamped to the screen, and it uses the page palette tokens, so it follows light and dark.
+  - Ticking several schedules still works: right-click one of the ticked rows and Pause, Resume and Delete act on all of them ("Delete 2 schedules"). Edit, Duplicate and Run now are greyed out for more than one.
+  - The `copy` icon was drawn in `contrib/icons/gen.py` (37 icons).
+- `ui.js` covers all of this: the featured slice's geometry for a small and a large winner (and no difference with no winner), which run is featured when throughput and p95 disagree, a tie featuring nothing, the menu items and order, Edit/Duplicate/Run now/Pause/Resume/Delete end to end, the multi-select menu, the keyboard path, closing, and that the old button bar is gone.
+
+### Changed
+- **The Schedules button bar is gone** (Run Now, Edit, Pause, Delete). A one-line hint under the heading says where the actions are. Add Schedule stays as a button.
+- **Run now is for one schedule at a time.** The old bar let you run several ticked schedules at once, but starting a job stops the one already running, so only the last of them ever kept running. The menu greys Run now out when more than one is ticked instead of pretending.
+
+### Fixed
+- **A paused schedule row lost its layout** (checkbox on its own line above the title). The row's style string had `opacity:.7` with no semicolon, which made the browser drop the `display:grid` that follows. This was already in v3; it is fixed and tested (a paused row is a grid and dimmed).
+
+### Verified
+- Full release process on the final tree: `gofmt -l` (nothing), `go vet`, `go build -buildvcs=false`, `go test -race -count=1` (cgo), `CGO_ENABLED=0` vet and `go test -count=1` (the fail-closed path), cross-compile for linux/amd64, arm64, arm, 386, riscv64, ppc64le, s390x, loong64 and mips, mipsle, mips64, mips64le, and the 32-bit (386) test binary run for real; all from the extracted archive as well as the working tree.
+- `ui.js` against the real daemon (native amd64 cgo build, real PAM login with a throwaway user, UDP reflector alive before the run, fresh state directory) in Chromium, light and dark, every request outside the server refused (none attempted): all checks pass in both schemes. The schedule actions run against the real server (add, duplicate, pause, resume, delete); only Run now is stubbed, so that a benchmark is not started behind the rest of the test.
+- A bug found by the new tests while writing them, and fixed before release: the featured slice was never drawn larger, because the "is anything featured" flag was computed before the slice list was filled in. The geometry test failed on it and passes now; the tooltip test alone would not have caught it, since the tooltip text does not depend on the drawing.
+- Screenshots in light and dark of the two pies (a two-run and a three-run comparison, including the run from the bug report) and of the Schedules page with the menu open, with a paused row.
+
+### Not verified
+- Touch devices: the menu opens on the browser's `contextmenu` event, which a long press produces on Android Chrome and not on iOS Safari. There is no separate touch gesture, so on iOS the actions are not reachable (the old button bar was). Not tested on any touch device.
+- Firefox and Safari. Chromium only.
+- Nothing in the Go code, `install.sh`, `uninstall.sh` or the other files in `contrib/` changed (only `contrib/icons/gen.py` and `contrib/uitest/ui.js`), so the 225k q/s performance check, the installer suite and CodeQL were not re-run.
+
+## [v5] - 2026-10-05 — One timestamp format on the Results page; "better" captions on the comparison pies
+
+### Added
+- **Captions under the comparison pies:** "Larger is better" under the throughput pie and "Smaller is better" under the p95 latency pie. Without them the two pies read as opposites (the bigger slice is the better run in one and the worse run in the other).
+
+### Fixed
+- **Scheduled and manual runs showed their start times in two formats** (`2026-10-05T10:03:55Z` next to `2026-10-05 14:34:51`). Both are UTC; only the format differed. The server stamps scheduled runs as ISO 8601 (`nowISO()` in `job.go`, unchanged), and the browser stamps its own runs as `YYYY-MM-DD HH:MM:SS`. The browser now converts everything to its own format on the way in (`normStarted()` in `bench.html`), so the stored history, the CSV export and the on-screen times all agree and the server API is untouched. Zone-less ISO times are read as UTC, offsets (`+02:00`) and fractional seconds are converted, and text that cannot be parsed is left as it was.
+- **The same mix broke ordering.** Scheduled runs are merged into the history and sorted by comparing the `started` strings, and a space sorts before a `T`, so a scheduled run could land in the wrong place relative to manual ones from the same day. With one format the string order is the time order.
+- **History already saved in your browser is repaired on load**, so existing ISO-stamped scheduled runs are converted without clearing anything. The stored format is unchanged, so downgrading to v4 still works.
+
+### Verified
+- Full release process on the final tree: `gofmt -l` (nothing), `go vet`, `go build -buildvcs=false`, `go test -race -count=1` (cgo), `CGO_ENABLED=0` vet and `go test -count=1` (the fail-closed path), cross-compile for linux/amd64, arm64, arm, 386, riscv64, ppc64le, s390x, loong64 and mips, mipsle, mips64, mips64le, and the 32-bit (386) test binary run for real; all from the extracted archive as well as the working tree.
+- `ui.js` against the real daemon (native amd64 cgo build, real PAM login with a throwaway user, UDP reflector alive before the run) in Chromium, light and dark, every request outside the server refused (none attempted): all checks pass in both schemes. New checks: the two captions, the normaliser on ISO, fractional-second, offset, zone-less, already-normal, junk and empty input, saved history repaired on load and ordered newest first, a scheduled run delivered by a stubbed `/api/scheduler-history` stored in the normal format through the real `syncSchedulerHistory()`, and the legend showing every run in one format.
+- Mutation check: with `normStarted()` turned into a pass-through, four of the new checks fail (including the wrong ordering); restored afterwards.
+- Screenshot of the comparison with one manual and one scheduled run (the numbers from the bug report), dark theme.
+
+### Not verified
+- The times are still shown in UTC without a label, as before; they are not converted to the viewer's local time. That is a possible follow-up, not changed here.
+- Firefox and Safari. Chromium only.
+- Nothing in the Go code, `install.sh`, `uninstall.sh` or the other files in `contrib/` changed (only `contrib/uitest/ui.js`), so the 225k q/s performance check, the installer suite and CodeQL were not re-run.
+
+## [v4] - 2026-10-05 — Output on its own tab; Results opens with the new run highlighted; pie-chart comparison; cleaner sign-in page
+
+### Added
+- **Benchmark page has two tabs, Setup and Output.** The output card (the terminal with its copy and clear buttons and status badge) moved from under the form to its own Output tab. Starting a run switches to Output, and a pulsing dot on the tab shows while a run is in progress. Re-running a past job from Results lands on Setup so the restored settings can be reviewed.
+- **When a benchmark finishes, the Results page opens and the new run is highlighted**: accent outline, a "New" badge, a tinted background and a one-time pulse, scrolled into view. A multi-server run highlights every server that completed. The highlight is dropped when you leave the Results page or start another run. Two deliberate limits: nothing happens if the run was only stopped (no run completed), and nothing happens if you have already moved to another page (for example into the schedule editor), so a finished run never pulls you out of what you were doing.
+- `DnsCharts.pie` in `web/charts.js`: a dependency-free canvas pie (slices clockwise from 12 o'clock, percentage labels on slices that can hold them, hover lifts the slice and shows a tooltip, redraws on resize and theme change, `destroy()` like the bar chart).
+- Two icons for `contrib/icons/gen.py`: `sliders` (Setup tab) and `pie-chart` (Compare button); `ui.css` regenerated by the script (36 icons).
+- `ui.js` checks for all of the above: the tabs and which pane shows what, Output opening on start, the jump to Results on completion, exactly one highlighted card and that it is on screen, the highlight clearing after leaving the page, no ReadMe/License links on the sign-in page, and the pies (both drawn, side by side, legend with error counts, hover tooltip, tooltip removed on close).
+
+### Changed
+- **Comparing runs now shows side-by-side pie charts** instead of a throughput bar chart over a p95 line chart: one pie of each run's share of combined throughput (q/s) and one of each run's share of combined p95 latency, one slice per selected run, the same colour for a run in both pies. Below them a shared legend lists each run with its q/s, p95, error count and rate, and start time, so the error information the bar chart marked is still there. Runs without a throughput or p95 value are left out of that pie only. The pie colours are evenly spaced hues, and the chart reads its background from the theme tokens at draw time, so it follows light/dark live. The canvas ids `compareQpsCanvas` and `compareP95Canvas` are unchanged. The bar chart code stays in `charts.js`, unused for now.
+- The Compare button uses the pie icon.
+- README: the Live output and Results history bullets describe the above.
+
+### Removed
+- **ReadMe | License links on the sign-in page.** Both are still in the sidebar after sign-in, and `/readme` and `/license` still serve the documents (unchanged and still tested).
+
+### Verified
+- Full release process on the final tree: `gofmt -l` (nothing), `go vet`, `go build -buildvcs=false`, `go test -race -count=1` (cgo), `CGO_ENABLED=0` vet and `go test -count=1` (the fail-closed path), cross-compile for linux/amd64, arm64, arm, 386, riscv64, ppc64le, s390x, loong64 and mips, mipsle, mips64, mips64le, and the 32-bit (386) test binary run for real; all from the extracted archive as well as the working tree.
+- `ui.js` against the real daemon (native amd64 cgo build, real PAM login with a throwaway user in the `dnsbench` group, UDP reflector alive before the run) in Chromium, light and dark, every request outside the server refused (none attempted): all checks pass in both schemes, including a real 3 s benchmark that ended on the Results page with the new run highlighted.
+- `node --check` on both inline scripts of `bench.html` and on `charts.js`; `assets_test.go` (icons defined, no other hosts, classes defined) passes.
+- Screenshots of the login page, Setup, Output mid-run, Results with the highlight, and the comparison pies with a hovered slice, in light and dark. The first screenshots showed the legend wrapping badly (swatch separated from its text, dates broken across lines); it was reworked and re-checked before release.
+
+### Not verified
+- The UDP engine, scheduler, installer and everything else in `contrib/` apart from `icons/gen.py` and `uitest/ui.js` were not touched, so the 225k q/s performance check, the installer/uninstaller suite and CodeQL were not re-run for this release (no request-sending or input-handling Go code changed; the pages' new code only builds DOM with `textContent` and fixed class names).
+- PAM on any architecture but native amd64 (the cross-compiles use the fail-closed stub); runtime beyond amd64 and 386.
+- Firefox and Safari. Chromium only.
+- `snaps/results.png` in the README is the earlier screenshot of the Results page and was not retaken.
+
 ## [v3] - 2026-10-05 — The web interface loads nothing from the internet; DoH targets checked (CodeQL alert); sidebar reordered
 
 ### Changed

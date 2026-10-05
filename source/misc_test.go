@@ -164,8 +164,12 @@ func TestTLSConfigGeneratesReusesAndServes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	// The accepting goroutine must be finished before this test returns: closing a TLS
+	// connection reads time.Local, and the scheduler tests that run next replace it.
+	done := make(chan struct{})
+	defer func() { ln.Close(); <-done }()
 	go func() {
+		defer close(done)
 		c, err := ln.Accept()
 		if err == nil {
 			c.(*tls.Conn).Handshake()

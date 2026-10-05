@@ -149,6 +149,50 @@
     .term-ok{color:var(--term-ok)}.term-warn{color:var(--term-warn)}
     .term-err{color:var(--term-err)}.term-hdr{color:var(--term-hdr);font-weight:500}
     .term-dim{color:var(--term-dim)}
+    /* ── benchmark sub-tabs ── */
+    .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px}
+    .tab{background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;padding:8px 14px;
+          font-size:1.066rem;font-weight:500;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:7px;transition:.12s}
+    .tab:hover{color:var(--text)}
+    .tab.active{color:var(--accent-text);border-bottom-color:var(--accent);font-weight:600}
+    .tab-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);display:none}
+    .tab-dot.on{display:inline-block;animation:dotpulse 1.2s ease-in-out infinite}
+    @keyframes dotpulse{50%{opacity:.35}}
+    .tab-pane{display:none}.tab-pane.active{display:block}
+    /* ── a freshly finished run on the Results page ── */
+    .run-card.hl{border:2px solid var(--accent)!important;background:linear-gradient(rgba(79,124,255,.08),rgba(79,124,255,.08)),var(--bg2)!important;
+                  box-shadow:0 0 0 3px rgba(79,124,255,.22)}
+    .run-card.hl.pulse{animation:hlpulse 1.6s ease-out 2}
+    @keyframes hlpulse{0%{box-shadow:0 0 0 0 rgba(79,124,255,.7)}100%{box-shadow:0 0 0 14px rgba(79,124,255,0)}}
+    .hl-badge{font-size:0.8rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:1px 7px;border-radius:10px;
+               background:var(--accent);color:#fff}
+    @media (prefers-reduced-motion:reduce){.run-card.hl.pulse,.tab-dot.on{animation:none}}
+    /* ── comparison pies ── */
+    .pie-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px}
+    @media (max-width:900px){.pie-grid{grid-template-columns:1fr}}
+    .pie-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
+    .pie-title{font-size:0.884rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+    .pie-host{position:relative;width:100%;height:280px}
+    .pie-caption{text-align:center;font-size:0.975rem;font-style:italic;color:var(--muted);margin-top:8px}
+    .pie-legend{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px 18px;font-size:0.975rem}
+    .pie-legend-row{display:flex;align-items:flex-start;gap:9px;min-width:0}
+    .pie-swatch{width:11px;height:11px;border-radius:2px;flex-shrink:0;margin-top:5px}
+    .pie-legend-text{min-width:0}
+    .pie-legend-name{font-family:monospace;color:var(--text);font-size:1.04rem}
+    .pie-legend-vals{color:var(--muted);font-size:0.91rem;line-height:1.5}
+    /* ── schedule rows and their right-click menu ── */
+    .sched-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .ctx-menu{position:fixed;z-index:1000;min-width:190px;padding:4px;background:var(--bg2);border:1px solid var(--border);
+               border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+    .ctx-menu[hidden]{display:none}
+    .ctx-item{display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;background:none;border:none;border-radius:5px;
+               font:inherit;font-size:1.04rem;color:var(--text);text-align:left;cursor:pointer}
+    .ctx-item i{width:15px;text-align:center;opacity:.8}
+    .ctx-item:hover,.ctx-item:focus-visible{background:var(--bg3);outline:none}
+    .ctx-item.danger{color:var(--danger)}
+    .ctx-item[aria-disabled="true"]{opacity:.4;cursor:default}
+    .ctx-item[aria-disabled="true"]:hover{background:none}
+    .ctx-sep{height:1px;margin:4px 6px;background:var(--border)}
     /* ── misc ── */
     .badge-pill{font-size:0.884rem;padding:2px 7px;border-radius:10px;font-weight:500}
     .hint{font-size:0.936rem;color:var(--muted);margin-top:4px}
@@ -211,6 +255,13 @@
       <p style="font-size:0.988rem;color:var(--muted);margin:0">DNS server test.</p>
     </div>
 
+    <!-- Sub-tabs -->
+    <div class="tabs" role="tablist">
+      <button class="tab active" id="tab-setup" role="tab" aria-selected="true" onclick="showBenchTab('setup')"><i class="bi bi-sliders"></i>Setup</button>
+      <button class="tab" id="tab-output" role="tab" aria-selected="false" onclick="showBenchTab('output')"><i class="bi bi-terminal"></i>Output<span class="tab-dot" id="outputDot"></span></button>
+    </div>
+
+    <div id="bench-pane-setup" class="tab-pane active" role="tabpanel">
     <!-- Benchmark form -->
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden">
       <div style="display:grid;grid-template-columns:1fr 360px">
@@ -299,6 +350,9 @@
       </div>
     </div>
 
+    </div>
+
+    <div id="bench-pane-output" class="tab-pane" role="tabpanel">
     <!-- Terminal -->
     <div class="term-wrap">
       <div class="term-bar">
@@ -320,6 +374,7 @@
       </div>
       <div id="terminal"><span class="term-dim">Ready.</span></div>
     </div>
+    </div>
 
   </div>
 
@@ -333,7 +388,7 @@
       <h5 class="fw-bold mb-0" style="display:none"></h5>
       <div class="d-flex gap-2">
         <button class="btn btn-sm btn-outline-primary d-none" id="btnCompare" onclick="compareSelected()">
-          <i class="bi bi-bar-chart me-1"></i>Compare
+          <i class="bi bi-pie-chart me-1"></i>Compare
         </button>
         <button class="btn btn-sm btn-outline-secondary" id="btnExport" onclick="exportHistoryCSV()">
           <i class="bi bi-download me-1"></i>Export CSV
@@ -343,20 +398,25 @@
         </button>
       </div>
     </div>
-    <p class="text-muted small mb-3">Select runs to compare. Stored across sessions.</p>
+    <p class="text-muted small mb-3">Select two or more runs to compare. Once the comparison is open it follows your selection. Stored across sessions.</p>
     <div id="compareChart" class="d-none mb-3" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
         <span style="font-size:1.066rem;font-weight:500;color:var(--text)">Comparison</span>
         <button onclick="closeCompare()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.17rem;padding:0;line-height:1"><i class="bi bi-x-lg"></i></button>
       </div>
-      <div style="font-size:0.884rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Throughput</div>
-      <div style="position:relative;width:100%;height:160px;margin-bottom:20px">
-        <canvas id="compareQpsCanvas" role="img" aria-label="Bar chart of throughput per run"></canvas>
+      <div class="pie-grid">
+        <div class="pie-card">
+          <div class="pie-title">Throughput &middot; share of combined q/s</div>
+          <div class="pie-host"><canvas id="compareQpsCanvas" role="img" aria-label="Pie chart of each run's share of combined throughput"></canvas></div>
+          <div class="pie-caption">Larger is better</div>
+        </div>
+        <div class="pie-card">
+          <div class="pie-title">p95 latency &middot; share of combined ms</div>
+          <div class="pie-host"><canvas id="compareP95Canvas" role="img" aria-label="Pie chart of each run's share of combined p95 latency"></canvas></div>
+          <div class="pie-caption">Smaller is better</div>
+        </div>
       </div>
-      <div style="font-size:0.884rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">p95 latency</div>
-      <div style="position:relative;width:100%;height:130px">
-        <canvas id="compareP95Canvas" role="img" aria-label="Line chart of p95 latency per run"></canvas>
-      </div>
+      <div id="compareLegend" class="pie-legend"></div>
     </div>
     <div style="display:flex;gap:16px;padding:6px 2px 10px;font-size:0.884rem;color:var(--muted);flex-wrap:wrap">
       <span style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--term-ok)"></span>p95 &lt;20ms · errors &lt;0.1%</span>
@@ -381,18 +441,12 @@
       </button>
     </div>
 
-    <!-- Bulk action bar (hidden until rows selected) -->
-    <div id="schedBulkBar" style="display:none;background:var(--bg2);border:1px solid var(--border);
-         border-radius:6px;padding:10px 14px;margin-bottom:10px;
-         align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-sm btn-outline-primary"   onclick="schedRunNow()"><i class="bi bi-play-fill me-1"></i>Run Now</button>
-      <button class="btn btn-sm btn-outline-secondary" id="schedEditBtn" onclick="schedEditSelected()"><i class="bi bi-pencil me-1"></i>Edit</button>
-      <button class="btn btn-sm btn-outline-warning"   id="schedPauseBtn" onclick="schedPauseResume()">Pause</button>
-      <button class="btn btn-sm btn-outline-danger"    onclick="schedDeleteSelected()"><i class="bi bi-trash me-1"></i>Delete</button>
-    </div>
+    <p class="hint" style="margin:-8px 0 12px">Right-click a schedule for Edit, Duplicate, Run now, Pause and Delete. Tick several to pause, resume or delete them together.</p>
 
     <div id="scheduleList"><p class="text-muted">Loading schedules…</p></div>
   </div>
+
+  <div id="schedMenu" class="ctx-menu" role="menu" aria-label="Schedule actions" hidden></div>
 
   <!-- Add / Edit Schedule modal -->
   <dialog class="modal" id="schedModal" aria-labelledby="schedModalTitle">
@@ -632,7 +686,6 @@ function renderSchedules() {
   const el = document.getElementById('scheduleList');
   if (!schedules.length) {
     el.innerHTML = '<p style="color:var(--muted)">No schedules yet. Click <strong>Add Schedule</strong> to create one.</p>';
-    updateSchedBulkBar();
     return;
   }
   const fmtTs = iso => {
@@ -654,8 +707,9 @@ function renderSchedules() {
       ? '<span style="color:var(--term-warn);font-size:.82rem;margin-left:8px"><i class="bi bi-pause-circle me-1"></i>Paused</span>'
       : '';
     return `
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;
-                padding:13px 16px;margin-bottom:10px;cursor:pointer;${bg}${s.paused?'opacity:.7':''}
+    <div class="sched-row" data-sched-id="${esc(s.id)}" tabindex="0" aria-haspopup="menu"
+         style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+                padding:13px 16px;margin-bottom:10px;cursor:pointer;${bg}${s.paused?'opacity:.7;':''}
                 display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center"
          onclick="if(event.target.tagName!=='INPUT')schedToggle('${esc(s.id)}')">
       <input type="checkbox" class="sched-cb" data-id="${esc(s.id)}" ${checked}
@@ -677,7 +731,6 @@ function renderSchedules() {
       </div>
     </div>`;
   }).join('');
-  updateSchedBulkBar();
 }
 
 function timingLabel(s) {
@@ -703,9 +756,8 @@ function esc(s) {
 function schedCbChange(cb) {
   if (cb.checked) selectedScheds.add(cb.dataset.id);
   else selectedScheds.delete(cb.dataset.id);
-  const row = cb.closest('div[style]');
+  const row = cb.closest('.sched-row');
   if (row) row.style.background = cb.checked ? 'rgba(79,124,255,.06)' : '';
-  updateSchedBulkBar();
 }
 
 function schedToggle(id) {
@@ -715,63 +767,115 @@ function schedToggle(id) {
   if (cb) { cb.checked = selectedScheds.has(id); schedCbChange(cb); }
 }
 
-function updateSchedBulkBar() {
-  const bar = document.getElementById('schedBulkBar');
-  const n = selectedScheds.size;
-  if (n === 0) { bar.style.display = 'none'; return; }
-  bar.style.display = 'flex';
-  const editBtn = document.getElementById('schedEditBtn');
-  if (editBtn) { editBtn.disabled = n !== 1; editBtn.style.opacity = n === 1 ? '1' : '0.5'; }
-  const selected = schedules.filter(s => selectedScheds.has(s.id));
-  const allPaused = selected.every(s => s.paused);
-  const noPaused  = selected.every(s => !s.paused);
-  const pauseBtn = document.getElementById('schedPauseBtn');
-  if (pauseBtn) {
-    if (allPaused)     { pauseBtn.textContent = 'Resume'; pauseBtn._action = 'resume'; }
-    else if (noPaused) { pauseBtn.textContent = 'Pause';  pauseBtn._action = 'pause';  }
-    else               { pauseBtn.textContent = 'Pause/Resume'; pauseBtn._action = 'mixed'; }
-  }
+// ── Right-click menu ────────────────────────────────────────────────────────
+// Acts on the row under the pointer, or on every ticked row if that row is one of several ticked.
+let _menuReturnFocus = null;
+
+function schedTargets(id) {
+  const ids = (selectedScheds.has(id) && selectedScheds.size > 1) ? [...selectedScheds] : [id];
+  return ids.map(i => schedules.find(s => s.id === i)).filter(Boolean);
 }
 
-async function schedRunNow() {
-  if (!selectedScheds.size) return;
-  for (const id of selectedScheds) {
-    const r = await fetch('/api/schedules/run', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})
-    });
-    const d = await r.json();
-    showSchedToast(d.ok ? `Started job ${d.job_id.slice(0,8)}…` : (d.error || 'Failed'),
-                   d.ok ? 'success' : 'danger');
-  }
+async function schedPost(path, id) {
+  const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id}) });
+  return r.json().catch(() => ({ ok:false }));
+}
+
+async function schedRun(s) {
+  const d = await schedPost('/api/schedules/run', s.id);
+  showSchedToast(d.ok ? `Started job ${d.job_id.slice(0,8)}…` : (d.error || 'Failed'), d.ok ? 'success' : 'danger');
   await loadSchedules();
 }
 
-function schedEditSelected() {
-  if (selectedScheds.size !== 1) return;
-  const s = schedules.find(x => x.id === [...selectedScheds][0]);
-  if (s) openSchedModal(s);
-}
-
-async function schedPauseResume() {
-  const btn = document.getElementById('schedPauseBtn');
-  if (btn._action === 'mixed') return;
-  const endpoint = btn._action === 'resume' ? '/api/schedules/resume' : '/api/schedules/pause';
-  await Promise.all([...selectedScheds].map(id =>
-    fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})})
-  ));
-  selectedScheds.clear();
+async function schedSetPaused(targets, pause) {
+  await Promise.all(targets.map(s => schedPost(pause ? '/api/schedules/pause' : '/api/schedules/resume', s.id)));
+  if (targets.length > 1) selectedScheds.clear();
   await loadSchedules();
 }
 
-async function schedDeleteSelected() {
-  if (!selectedScheds.size) return;
-  if (!confirm(`Delete ${selectedScheds.size} schedule${selectedScheds.size > 1 ? 's' : ''}?`)) return;
-  await Promise.all([...selectedScheds].map(id =>
-    fetch('/api/schedules/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})})
-  ));
-  selectedScheds.clear();
+async function schedDelete(targets) {
+  const n = targets.length;
+  const what = n > 1 ? `${n} schedules` : `"${targets[0].name || targets[0].server}"`;
+  if (!confirm(`Delete ${what}?`)) return;
+  await Promise.all(targets.map(s => schedPost('/api/schedules/delete', s.id)));
+  targets.forEach(s => selectedScheds.delete(s.id));
   await loadSchedules();
 }
+
+function schedMenuItems(targets) {
+  const n = targets.length, one = n === 1, t = targets[0];
+  const allPaused = targets.every(s => s.paused);
+  const count = n > 1 ? ` ${n} schedules` : '';
+  return [
+    { label: 'Edit',      icon: 'pencil',    enabled: one, run: () => openSchedModal(t) },
+    { label: 'Duplicate', icon: 'copy',      enabled: one, run: () => openSchedModal(t, true) },
+    { label: 'Run now',   icon: 'play-fill', enabled: one, run: () => schedRun(t) },
+    { label: (allPaused ? 'Resume' : 'Pause') + count, icon: allPaused ? 'play-circle-fill' : 'pause-circle', enabled: true,
+      run: () => schedSetPaused(targets, !allPaused) },
+    { sep: true },
+    { label: 'Delete' + count, icon: 'trash', danger: true, enabled: true, run: () => schedDelete(targets) },
+  ];
+}
+
+function closeSchedMenu(refocus) {
+  const m = document.getElementById('schedMenu');
+  if (m.hidden) return;
+  m.hidden = true;
+  m.textContent = '';
+  if (refocus && _menuReturnFocus && document.contains(_menuReturnFocus)) _menuReturnFocus.focus();
+  _menuReturnFocus = null;
+}
+
+function openSchedMenu(x, y, id, row) {
+  const targets = schedTargets(id);
+  if (!targets.length) return;
+  const m = document.getElementById('schedMenu');
+  m.textContent = '';
+  schedMenuItems(targets).forEach(it => {
+    if (it.sep) { const d = document.createElement('div'); d.className = 'ctx-sep'; d.setAttribute('role', 'separator'); m.appendChild(d); return; }
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'ctx-item' + (it.danger ? ' danger' : ''); b.setAttribute('role', 'menuitem');
+    if (!it.enabled) b.setAttribute('aria-disabled', 'true');
+    const ic = document.createElement('i'); ic.className = 'bi bi-' + it.icon;
+    const tx = document.createElement('span'); tx.textContent = it.label;
+    b.append(ic, tx);
+    b.addEventListener('click', () => { if (!it.enabled) return; closeSchedMenu(false); it.run(); });
+    m.appendChild(b);
+  });
+  _menuReturnFocus = row;
+  m.hidden = false;
+  // keep it on screen
+  const w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(4, Math.min(x, innerWidth - w - 4)) + 'px';
+  m.style.top  = Math.max(4, Math.min(y, innerHeight - h - 4)) + 'px';
+  const first = m.querySelector('.ctx-item:not([aria-disabled="true"])');
+  if (first) first.focus();
+}
+
+document.getElementById('scheduleList').addEventListener('contextmenu', e => {
+  const row = e.target.closest('.sched-row');
+  if (!row) return;
+  e.preventDefault();
+  let x = e.clientX, y = e.clientY;
+  if (!x && !y) { const r = row.getBoundingClientRect(); x = r.left + 24; y = r.top + r.height / 2; }  // from the keyboard (Menu key, Shift+F10)
+  openSchedMenu(x, y, row.dataset.schedId, row);
+});
+document.addEventListener('mousedown', e => { if (!e.target.closest('#schedMenu')) closeSchedMenu(false); });
+document.addEventListener('keydown', e => {
+  const m = document.getElementById('schedMenu');
+  if (m.hidden) return;
+  const items = [...m.querySelectorAll('.ctx-item')].filter(b => b.getAttribute('aria-disabled') !== 'true');
+  const i = items.indexOf(document.activeElement);
+  if (e.key === 'Escape')        { e.preventDefault(); closeSchedMenu(true); }
+  else if (e.key === 'ArrowDown'){ e.preventDefault(); items[(i + 1) % items.length].focus(); }
+  else if (e.key === 'ArrowUp')  { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+  else if (e.key === 'Home')     { e.preventDefault(); items[0].focus(); }
+  else if (e.key === 'End')      { e.preventDefault(); items[items.length - 1].focus(); }
+  else if (e.key === 'Tab')      { closeSchedMenu(false); }
+});
+window.addEventListener('blur',   () => closeSchedMenu(false));
+window.addEventListener('resize', () => closeSchedMenu(false));
+document.querySelector('.main-content').addEventListener('scroll', () => closeSchedMenu(false));
 
 function closeSchedModal() {
   const dlg = document.getElementById('schedModal');
@@ -780,10 +884,13 @@ function closeSchedModal() {
 // A click on the dimmed backdrop lands on the <dialog> itself (its content fills the rest).
 document.getElementById('schedModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeSchedModal(); });
 
-function openSchedModal(s) {
-  document.getElementById('schedModalTitle').textContent = s ? 'Edit Schedule' : 'Add Schedule';
-  document.getElementById('schedId').value        = s ? s.id : '';
-  document.getElementById('schedName').value      = s ? (s.name || '') : '';
+// openSchedModal()              add a new schedule
+// openSchedModal(s)             edit s
+// openSchedModal(s, true)       a new schedule pre-filled from s (no id, so Save adds rather than updates)
+function openSchedModal(s, copy) {
+  document.getElementById('schedModalTitle').textContent = s ? (copy ? 'Duplicate Schedule' : 'Edit Schedule') : 'Add Schedule';
+  document.getElementById('schedId').value        = (s && !copy) ? s.id : '';
+  document.getElementById('schedName').value      = s ? (copy ? (s.name || s.server) + ' (copy)' : (s.name || '')) : '';
   document.getElementById('schedServer').value    = s ? s.server : '';
   document.getElementById('schedProtocol').value  = s ? s.protocol : 'udp';
   document.getElementById('schedConcurrency').value = s ? s.concurrency : '';
@@ -884,11 +991,21 @@ function esc(s){
     .replace(/'/g,'&#39;');
 }
 
+function showBenchTab(name){
+  document.querySelectorAll('#page-bench .tab-pane').forEach(p=>p.classList.toggle('active',p.id==='bench-pane-'+name));
+  document.querySelectorAll('#page-bench .tab').forEach(t=>{
+    const on=t.id==='tab-'+name; t.classList.toggle('active',on); t.setAttribute('aria-selected',on?'true':'false');
+  });
+  if(name==='output'){ const t=document.getElementById('terminal'); t.scrollTop=t.scrollHeight; }
+}
+
 function showPage(name,link){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-link').forEach(l=>l.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   if(link) link.classList.add('active');
+  if(name!=='history') clearHighlight();
+  closeSchedMenu(false);
   if(name==='schedules') loadSchedules();
   if(name==='history') { syncSchedulerHistory().then(renderHistory); }
   if(name==='readme')  loadDocPage('readme',  'readmeContent');
@@ -1164,11 +1281,22 @@ function clearTerminal(){term.innerHTML='';}
 let curJob=null, curEvt=null;
 
 const HISTORY_KEY='dnsbench-history';
+// One timestamp format everywhere: "YYYY-MM-DD HH:MM:SS", in UTC. The browser has always
+// stamped runs this way; the server stamps scheduled runs as ISO 8601 ("2026-10-05T10:03:55Z",
+// also UTC), so those are converted on the way in. Anything unparseable is left as it was.
+function normStarted(v){
+  if(typeof v!=='string' || !v) return v||'';
+  if(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(v)) return v;
+  // an ISO time with no zone marker is the server's UTC, not the browser's local time
+  const iso=/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?$/.test(v) ? v+'Z' : v;
+  const t=Date.parse(iso);
+  return isNaN(t) ? v : new Date(t).toISOString().replace('T',' ').slice(0,19);
+}
 function loadHistory(){
   try{
     const raw=localStorage.getItem(HISTORY_KEY);
     const runs=raw ? JSON.parse(raw) : [];
-    runs.forEach(r=>{ delete r._selected; });
+    runs.forEach(r=>{ delete r._selected; r.started=normStarted(r.started); });
     return runs;
   }catch(e){ return []; }
 }
@@ -1206,11 +1334,11 @@ function renderHistoryIfVisible() {
 }
 
 // Run a single server against the given args; returns true if completed normally.
-async function runOneServer(args){
+async function runOneServer(args,batch){
   return new Promise(resolve=>{
     const _now=new Date();
     const run={id:null,args,started:_now.toISOString().replace('T',' ').slice(0,19),status:'running'};
-    runHistory.unshift(run); renderHistoryIfVisible();
+    runHistory.unshift(run); if(batch) batch.push(run); renderHistoryIfVisible();
     const jobLines=[];
 
     fetch('/api/start-job',{method:'POST',
@@ -1269,7 +1397,9 @@ async function runOneServer(args){
 async function startBench(){
   if(curJob) return;
   clearTerminal(); setStatus('starting','primary');
+  clearHighlight();
   const args=getArgs();
+  const batch=[];   // the runs this click starts, highlighted on Results when they finish
 
   // Parse comma-separated servers
   const servers=args.server.split(',').map(s=>s.trim()).filter(Boolean);
@@ -1279,6 +1409,8 @@ async function startBench(){
 
   document.getElementById('btnRun').style.display='none';
   document.getElementById('btnStop').style.display='';
+  showBenchTab('output');
+  document.getElementById('outputDot').classList.add('on');
 
   const total=servers.length;
   for(let i=0;i<servers.length;i++){
@@ -1292,7 +1424,7 @@ async function startBench(){
       termLine(`▶ [${args.protocol.toUpperCase()}] → ${server}`,'term-hdr');
     }
     setStatus(total>1?`running ${i+1}/${total}`:'running','primary');
-    const ok=await runOneServer(serverArgs);
+    const ok=await runOneServer(serverArgs,batch);
     if(!ok && curJob===null){
       // was killed — stop the queue
       break;
@@ -1302,7 +1434,21 @@ async function startBench(){
   setStatus(total>1?'done':'done','success');
   document.getElementById('btnRun').style.display='';
   document.getElementById('btnStop').style.display='none';
+  document.getElementById('outputDot').classList.remove('on');
+
+  // Finished: show the result. Only if the person is still on the Benchmark page (not
+  // part-way through editing a schedule, say) and at least one run actually completed.
+  const finished=batch.filter(r=>r.status==='done');
+  if(finished.length && document.getElementById('page-bench').classList.contains('active')){
+    setHighlight(finished);
+    showPage('history',document.querySelector('.nav-link[onclick*="history"]'));
+  }
 }
+
+// ── Highlight of freshly finished runs on the Results page ──
+let _hlRuns=[], _hlPulse=false;
+function setHighlight(runs){ _hlRuns=runs.slice(); _hlPulse=true; }
+function clearHighlight(){ _hlRuns=[]; _hlPulse=false; }
 
 async function stopBench(){
   if(curJob) await fetch(`/api/job/${curJob}/kill`,{method:'POST'});
@@ -1345,6 +1491,7 @@ function redoJob(idx){
   setArgs(r.args);
   // Switch to the bench tab and focus the Run button — one click to go
   showPage('bench', document.querySelector('.nav-link[onclick*="bench"]'));
+  showBenchTab('setup');
   document.getElementById('btnRun').focus();
 }
 
@@ -1373,6 +1520,15 @@ function parseStats(lines){
 let _compareChart=null;
 let _compareP95Chart=null;
 let _compareVisible={};
+let _compareLive=false;        // the comparison has been opened and follows the ticked results until it is closed
+let _compareSig='';            // what the panel currently shows, so it only redraws when that changes
+const _colorSlot=new Map();    // run -> palette slot, kept while the run stays ticked so its colour never changes under you
+// First ten are fixed (blue and orange first, as before), then golden-angle hues for any number more.
+const PIE_HUES=[215,35,150,320,185,270,60,0,100,245];
+function pieColor(k){
+  const h=k<PIE_HUES.length ? PIE_HUES[k] : (215+k*137.508)%360;
+  return 'hsl('+Math.round(h)+',62%,46%)';
+}
 
 function clearHistory(){
   if(!runHistory.length) return;
@@ -1448,7 +1604,8 @@ function updateToolbar(){
   const selected=runHistory.filter(r=>r._selected);
   const btnCompare=document.getElementById('btnCompare');
   const btnClear=document.getElementById('btnClear');
-  btnCompare.classList.toggle('d-none', selected.length<2);
+  const panelOpen=!document.getElementById('compareChart').classList.contains('d-none');
+  btnCompare.classList.toggle('d-none', selected.length<2 || panelOpen);   // once open, the panel follows the ticks
   if(btnClear) btnClear.innerHTML=selected.length>0
     ? '<i class="bi bi-trash me-1"></i>Remove selected ('+selected.length+')'
     : '<i class="bi bi-trash me-1"></i>Clear';
@@ -1456,62 +1613,109 @@ function updateToolbar(){
 
 function toggleSelect(idx){
   runHistory[idx]._selected=!runHistory[idx]._selected;
+  renderHistory();     // also brings an open comparison up to date
   updateToolbar();
-  renderHistory();
+}
+
+function compareSigOf(selected){
+  return selected.map(r=>[r.started,(r.args||{}).server,(r.args||{}).protocol,r.stats.qps,r.stats.p95,r.stats.errors,r.stats.sent].join('|')).join(';');
+}
+
+// Hide the panel without forgetting that it is open: ticking back up to two brings it back.
+function hideComparePanel(){
+  closeCompareCharts();
+  _compareSig='';
+  document.getElementById('compareChart').classList.add('d-none');
+  updateToolbar();
+}
+
+// Called whenever the list is drawn: redraw the open comparison if the ticked results (or their numbers) changed.
+function syncCompare(){
+  if(!_compareLive) return;
+  const selected=runHistory.filter(r=>r._selected && r.stats);
+  if(selected.length<2){ if(_compareSig!=='' || !document.getElementById('compareChart').classList.contains('d-none')) hideComparePanel(); return; }
+  if(compareSigOf(selected)!==_compareSig) compareSelected();
 }
 
 function compareSelected(){
   const selected=runHistory.filter(r=>r._selected && r.stats);
-  if(selected.length<2) return;
-  const labels=selected.map(r=>[r.started, r.args.server.split(':')[0]+'/'+r.args.protocol.toUpperCase()]);
-  const qpsData=selected.map(r=>r.stats.qps||0);
-  const p95Data=selected.map(r=>r.stats.p95??null);
-  const errData=selected.map(r=>r.stats.errors||0);
-  const hasP95=p95Data.some(v=>v!=null);
+  if(selected.length<2){ if(_compareLive) hideComparePanel(); return; }
+  _compareLive=true;
+  _compareSig=compareSigOf(selected);
   const cs=getComputedStyle(document.documentElement);
   const tok=n=>cs.getPropertyValue(n).trim();
-  const textColor=tok('--text');
-  const mutedColor=tok('--grid');
-  const bgColor=tok('--bg');
-  const blue='rgba(79,124,255,1)';
-  const yellow=tok('--warn');
+  const theme={text:tok('--text'),grid:tok('--grid'),bg:tok('--bg3')};
+  const n=selected.length;
+  // One colour per run, shared by both pies and the legend, and stable while the run stays ticked:
+  // a run that is unticked frees its slot, a newly ticked one takes the lowest free slot.
+  for(const r of [..._colorSlot.keys()]) if(!selected.includes(r)) _colorSlot.delete(r);
+  const usedSlots=new Set(_colorSlot.values());
+  selected.forEach(r=>{ if(_colorSlot.has(r)) return; let k=0; while(usedSlots.has(k)) k++; usedSlots.add(k); _colorSlot.set(r,k); });
+  const colors=selected.map(r=>pieColor(_colorSlot.get(r)));
+  const names=selected.map(r=>(r.args.server||'').split(':')[0]+' / '+(r.args.protocol||'udp').toUpperCase());
+  const qps=selected.map(r=>r.stats.qps>0?r.stats.qps:null);
+  const p95=selected.map(r=>r.stats.p95>0?r.stats.p95:null);
+  const sum=a=>a.reduce((t,v)=>t+(v||0),0);
+  // The winning slice(s): the best value, if there is something to compare it with. Nothing is
+  // featured when fewer than two runs have a value or when they all tie.
+  const bestOf=(vals,pick)=>{
+    const live=vals.map((v,i)=>v==null?-1:i).filter(i=>i>=0);
+    if(live.length<2) return [];
+    const best=pick(...live.map(i=>vals[i]));
+    const w=live.filter(i=>vals[i]===best);
+    return w.length===live.length ? [] : w;
+  };
+  const qWin=bestOf(qps,Math.max), pWin=bestOf(p95,Math.min);
+  const qTotal=sum(qps), pTotal=sum(p95);
+  const errText=r=>{
+    const e=r.stats.errors||0, sent=r.stats.sent||0;
+    return e.toLocaleString()+' errors'+(sent>0?' ('+(e/sent*100).toFixed(1)+'%)':'');
+  };
 
-  if(_compareChart){ _compareChart.destroy(); _compareChart=null; }
-  if(_compareP95Chart){ _compareP95Chart.destroy(); _compareP95Chart=null; }
+  closeCompareCharts();
 
-  const theme={text:textColor,grid:mutedColor,bg:bgColor};
-  const marks=[];
-  selected.forEach((r,i)=>{ if(r.stats&&r.stats.errors) marks.push({index:i,text:'⚠ '+r.stats.errors.toLocaleString(),color:'#f87171'}); });
-
-  _compareChart=DnsCharts.bar(document.getElementById('compareQpsCanvas'),{
-    labels, values:qpsData, theme,
-    fill:'rgba(79,124,255,0.8)', stroke:blue, radius:3,
-    yTitle:'q/s', yColor:blue, yFormat:v=>v>=1000?(v/1000).toFixed(0)+'k':String(v),
-    marks,
-    tip:i=>{
-      const r=selected[i];
-      let errLine='';
-      if(r&&r.stats){const e=r.stats.errors||0;const s=r.stats.sent||0;const pct=s>0?(e/s*100).toFixed(1):'0.0';errLine=' '+e.toLocaleString()+' errors ('+pct+'%)';}
-      return {title:labels[i],body:[' '+qpsData[i].toLocaleString()+' q/s',errLine]};
-    }
+  _compareChart=DnsCharts.pie(document.getElementById('compareQpsCanvas'),{
+    values:qps, colors, theme, emptyText:'No throughput recorded', winners:qWin,
+    tip:i=>({title:[names[i],selected[i].started],
+             body:[qps[i].toLocaleString()+' q/s  ('+(qps[i]/qTotal*100).toFixed(1)+'% of combined)',errText(selected[i]),
+                   qWin.includes(i)?'\u2605 Highest throughput':'']})
+  });
+  _compareP95Chart=DnsCharts.pie(document.getElementById('compareP95Canvas'),{
+    values:p95, colors, theme, emptyText:'No p95 latency recorded', winners:pWin,
+    tip:i=>({title:[names[i],selected[i].started],
+             body:[p95[i].toFixed(1)+' ms p95  ('+(p95[i]/pTotal*100).toFixed(1)+'% of combined)',
+                   pWin.includes(i)?'\u2605 Lowest p95':'']})
   });
 
-  if(hasP95){
-    _compareP95Chart=DnsCharts.bar(document.getElementById('compareP95Canvas'),{
-      labels, values:p95Data, theme,
-      fill:yellow, radius:4, width:0.48,
-      yTitle:'ms', yColor:yellow, yFormat:v=>v+'ms', ySuggestedMax:55,
-      refLines:[{value:20,color:'#fbbf24',label:'20ms'},{value:50,color:'#f87171',label:'50ms'}],
-      tip:i=>({title:labels[i],body:[' '+p95Data[i].toFixed(1)+' ms']})
-    });
-  }
+  // Shared legend: colour, run, and the numbers behind each slice (errors included).
+  const legend=document.getElementById('compareLegend');
+  legend.textContent='';
+  selected.forEach((r,i)=>{
+    const row=document.createElement('div'); row.className='pie-legend-row';
+    const sw=document.createElement('span'); sw.className='pie-swatch'; sw.style.background=colors[i];
+    const nm=document.createElement('div'); nm.className='pie-legend-name'; nm.textContent=names[i];
+    const vals=document.createElement('div'); vals.className='pie-legend-vals';
+    vals.textContent=(r.stats.qps!=null?r.stats.qps.toLocaleString(undefined,{maximumFractionDigits:0})+' q/s':'- q/s')
+      +' · '+(r.stats.p95!=null?r.stats.p95.toFixed(1)+' ms':'- ms')
+      +' · '+errText(r);
+    const when=document.createElement('div'); when.className='pie-legend-vals'; when.textContent=r.started||'';
+    const txt=document.createElement('div'); txt.className='pie-legend-text'; txt.append(nm,vals,when);
+    row.append(sw,txt);
+    legend.appendChild(row);
+  });
 
   document.getElementById('compareChart').classList.remove('d-none');
+  updateToolbar();
+}
+
+function closeCompareCharts(){
+  if(_compareChart){ _compareChart.destroy(); _compareChart=null; }
+  if(_compareP95Chart){ _compareP95Chart.destroy(); _compareP95Chart=null; }
 }
 
 function closeCompare(){
-  if(_compareChart){ _compareChart.destroy(); _compareChart=null; }
-  if(_compareP95Chart){ _compareP95Chart.destroy(); _compareP95Chart=null; }
+  _compareLive=false; _compareSig=''; _colorSlot.clear();
+  closeCompareCharts();
   _compareVisible={};
   document.getElementById('compareChart').classList.add('d-none');
   runHistory.forEach(r=>{ r._selected=false; });
@@ -1522,7 +1726,7 @@ function closeCompare(){
 
 function renderHistory(){
   const el=document.getElementById('historyList');
-  if(!runHistory.length){el.innerHTML='<p style="color:var(--muted);font-size:1.066rem">No runs yet.</p>';return;}
+  if(!runHistory.length){el.innerHTML='<p style="color:var(--muted);font-size:1.066rem">No runs yet.</p>';syncCompare();return;}
   el.innerHTML=runHistory.map((r,idx)=>{
     const s=r.stats||{};
     const sel=r._selected;
@@ -1557,15 +1761,19 @@ function renderHistory(){
     const p95Color=p95Val<20?'var(--term-ok)':p95Val<50?'#fbbf24':'var(--term-err)';
 
     const border=sel?'2px solid #4f7cff':'0.5px solid var(--border)';
+    const hl=_hlRuns.includes(r);
+    const cardCls='run-card'+(hl?' hl'+(_hlPulse?' pulse':''):'');
+    const hlBadge=hl?'<span class="hl-badge">New</span>':'';
 
     if(!hasStats){
-      return `<div style="background:var(--bg2);border:${border};border-radius:8px;padding:10px 14px;margin-bottom:6px;opacity:${killed?0.45:1}">
+      return `<div class="${cardCls}" style="background:var(--bg2);border:${border};border-radius:8px;padding:10px 14px;margin-bottom:6px;opacity:${killed?0.45:1}">
         <div onclick="toggleSelect(${idx})" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
           <input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleSelect(${idx})" style="margin:0;flex-shrink:0">
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
               <span style="font-family:monospace;font-size:1.066rem;color:var(--text)">${esc(server)}</span>
               <span style="font-size:0.91rem;padding:1px 6px;border-radius:4px;background:var(--bg3);color:var(--muted)">${esc(proto)}</span>
+              ${hlBadge}
               ${killed?'<span style="font-size:0.91rem;padding:1px 6px;border-radius:4px;background:rgba(251,191,36,.15);color:#fbbf24">killed</span>':''}
               ${running?'<span style="font-size:0.91rem;padding:1px 6px;border-radius:4px;background:rgba(79,124,255,.15);color:#4f7cff">running</span>':''}
             </div>
@@ -1582,12 +1790,13 @@ function renderHistory(){
       </div>`;
     }
 
-    return `<div style="background:var(--bg2);border:${border};border-radius:8px;padding:10px 14px;margin-bottom:6px;">
+    return `<div class="${cardCls}" style="background:var(--bg2);border:${border};border-radius:8px;padding:10px 14px;margin-bottom:6px;">
       <div onclick="toggleSelect(${idx})" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;cursor:pointer;">
         <div style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleSelect(${idx})" style="margin:0;flex-shrink:0">
           <span style="font-family:monospace;font-size:1.066rem;font-weight:500;color:var(--text)">${esc(server)}</span>
           <span style="font-size:0.91rem;padding:1px 6px;border-radius:4px;background:var(--bg3);color:var(--muted)">${esc(proto)}</span>
+              ${hlBadge}
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <button class="run-out-btn" data-idx="${idx}" onclick="event.stopPropagation();toggleOutput(${idx})" title="Toggle output" style="display:none;background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1"><i class="bi bi-terminal" style="font-size:0.975rem"></i></button>
@@ -1624,6 +1833,12 @@ function renderHistory(){
     </div>`;
   }).join('');
   attachOutputs();
+  if(_hlRuns.length){
+    const first=el.querySelector('.run-card.hl');
+    if(first) first.scrollIntoView({block:'nearest'});
+    _hlPulse=false;   // the pulse plays once; the outline stays until you leave the page
+  }
+  syncCompare();
 }
 
 function onThemeChange(){
@@ -1713,7 +1928,7 @@ async function syncSchedulerHistory() {
           duration:    (run.args || {}).duration    || '',
           query_type:  (run.args || {}).qtype       || 'A',
         },
-        started: run.started || '',
+        started: normStarted(run.started),
         status:  run.status  || 'done',
         stats,
         output:  run.lines   || [],

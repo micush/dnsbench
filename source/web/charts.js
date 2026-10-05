@@ -1,4 +1,6 @@
-// A small bar chart on a <canvas>, for the run-comparison panel. No dependencies.
+// Small canvas charts for the run-comparison panel. No dependencies.
+//
+// DnsCharts.bar -- a bar chart:
 //
 //   const chart = DnsCharts.bar(canvas, {
 //     labels: [['2026-10-05 08:02:39', '127.0.0.1/UDP'], ...],  // one entry per bar; an array is several lines
@@ -13,7 +15,19 @@
 //   });
 //   chart.destroy();
 //
-// The canvas fills its parent (which needs a definite size) and redraws when that
+// DnsCharts.pie -- a pie chart; one slice per entry, clockwise from 12 o'clock:
+//
+//   const chart = DnsCharts.pie(canvas, {
+//     values: [48210, 35120, null],      // null or <= 0 = no slice
+//     colors: ['hsl(...)', ...],          // one CSS colour per entry
+//     theme:  { text, grid, bg },         // bg also separates the slices
+//     tip(i): { title: [...], body: [...] },
+//     emptyText: 'No data',               // shown when nothing can be drawn
+//     winners: [0],                       // indices to feature: pushed out, enlarged, outlined and glowing
+//   });
+//   chart.destroy();
+//
+// Both fill its parent (which needs a definite size) and redraws when that
 // size changes, including when a hidden parent is first shown.
 (function () {
   'use strict';
@@ -234,5 +248,169 @@
     };
   }
 
-  window.DnsCharts = { bar: bar };
+  // ---- pie ----------------------------------------------------------------
+  function pie(canvas, spec) {
+    var host = canvas.parentElement;
+    var ctx = canvas.getContext('2d');
+    var family = getComputedStyle(canvas).fontFamily || 'sans-serif';
+    var th = spec.theme || {};
+    var values = spec.values;
+    var total = 0;
+    values.forEach(function (v) { if (v > 0) total += v; });
+    var slices = null;   // {i, a0, a1, share} from the last draw
+    var cx = 0, cy = 0, rad = 0;
+    var hover = -1;
+    var isWin = function (i) { return (spec.winners || []).indexOf(i) >= 0; };
+    var WIN_PUSH = 10, WIN_GROW = 8;   // how far a featured slice moves out, and how much larger it is
+    var tipEl = null;
+    var dead = false;
+
+    canvas.style.cssText = 'display:block;width:100%;height:100%';
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+
+    function draw() {
+      if (dead) return;
+      var w = host.clientWidth, h = host.clientHeight;
+      if (w < 20 || h < 20) { slices = null; return; }
+      var dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = th.bg || 'transparent';
+      ctx.fillRect(0, 0, w, h);
+
+      slices = [];
+      if (!(total > 0)) {
+        ctx.fillStyle = th.text; ctx.font = '13px ' + family; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(spec.emptyText || 'No data', w / 2, h / 2);
+        return;
+      }
+      cx = w / 2; cy = h / 2;
+      var drawn = values.filter(function (v) { return v > 0; }).length;   // slices.length is still 0 here
+      var anyWin = drawn > 1 && values.some(function (v, i) { return v > 0 && isWin(i); });
+      rad = Math.max(10, Math.min(w, h) / 2 - 10 - (anyWin ? WIN_PUSH + WIN_GROW + 4 : 0));
+
+      var a = -Math.PI / 2;
+      values.forEach(function (v, i) {
+        if (!(v > 0)) return;
+        var share = v / total, a1 = a + share * Math.PI * 2;
+        slices.push({ i: i, a0: a, a1: a1, share: share });
+        a = a1;
+      });
+      // where each slice sits: centre and radius (a featured slice is pushed out and larger)
+      slices.forEach(function (sl) {
+        var mid = (sl.a0 + sl.a1) / 2, win = anyWin && isWin(sl.i);
+        var push = (win ? WIN_PUSH : 0) + (sl.i === hover ? 4 : 0);
+        sl.win = win;
+        sl.x = cx + Math.cos(mid) * push; sl.y = cy + Math.sin(mid) * push;
+        sl.r = rad + (win ? WIN_GROW : 0);
+        sl.mid = mid;
+      });
+
+      // others first, featured slices last so their outline and glow sit on top
+      slices.slice().sort(function (p, q) { return (p.win ? 1 : 0) - (q.win ? 1 : 0); }).forEach(function (sl) {
+        ctx.save();
+        ctx.beginPath();
+        if (slices.length > 1) ctx.moveTo(sl.x, sl.y);
+        ctx.arc(sl.x, sl.y, sl.r, sl.a0, sl.a1);
+        ctx.closePath();
+        if (sl.win) { ctx.shadowColor = spec.colors[sl.i]; ctx.shadowBlur = 22; }
+        else if (anyWin) ctx.globalAlpha = 0.72;
+        ctx.fillStyle = spec.colors[sl.i];
+        ctx.fill();
+        ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+        if (sl.win) { ctx.lineWidth = 3; ctx.strokeStyle = th.text || '#fff'; ctx.stroke(); }
+        else if (slices.length > 1) { ctx.lineWidth = 2; ctx.strokeStyle = th.bg || '#000'; ctx.stroke(); }
+        ctx.restore();
+      });
+
+      // percentage inside each slice big enough to hold it; featured slices also say "Best"
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      slices.forEach(function (sl) {
+        if (sl.share < 0.06) return;
+        var tx = sl.x + Math.cos(sl.mid) * sl.r * 0.62, ty = sl.y + Math.sin(sl.mid) * sl.r * 0.62;
+        var txt = (sl.share * 100).toFixed(sl.share >= 0.995 ? 0 : 1) + '%';
+        var big = sl.win && sl.share >= 0.12;
+        ctx.font = 'bold ' + (sl.win ? 15 : 13) + 'px ' + family;
+        var dy = big ? -8 : 0;
+        ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillText(txt, tx + 1, ty + dy + 1);
+        ctx.fillStyle = '#fff'; ctx.fillText(txt, tx, ty + dy);
+        if (big) {
+          ctx.font = 'bold 11px ' + family;
+          ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillText('\u2605 BEST', tx + 1, ty + 9);
+          ctx.fillStyle = '#fff'; ctx.fillText('\u2605 BEST', tx, ty + 8);
+        }
+      });
+    }
+
+    function hit(e) {
+      if (!slices || !slices.length) return -1;
+      var r = canvas.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+      // test the featured (top-most) slices first, each against its own centre and radius
+      var order = slices.slice().sort(function (p, q) { return (q.win ? 1 : 0) - (p.win ? 1 : 0); });
+      for (var k = 0; k < order.length; k++) {
+        var sl = order[k], dx = px - sl.x, dy = py - sl.y;
+        if (Math.sqrt(dx * dx + dy * dy) > sl.r) continue;
+        if (slices.length === 1) return sl.i;
+        var ang = Math.atan2(dy, dx);
+        if (ang < -Math.PI / 2) ang += Math.PI * 2;      // slices start at 12 o'clock
+        if (ang >= sl.a0 && ang <= sl.a1) return sl.i;
+      }
+      return -1;
+    }
+
+    function hideTip() {
+      if (tipEl) tipEl.style.display = 'none';
+      if (hover !== -1) { hover = -1; draw(); }
+    }
+    function onMove(e) {
+      var i = hit(e);
+      if (i < 0) return hideTip();
+      if (i !== hover) { hover = i; draw(); }
+      if (!spec.tip) return;
+      var t = spec.tip(i);
+      if (!tipEl) {
+        tipEl = document.createElement('div');
+        tipEl.setAttribute('role', 'tooltip');
+        tipEl.style.cssText = 'position:absolute;z-index:5;pointer-events:none;background:rgba(0,0,0,.85);color:#fff;' +
+          'font:12px/1.4 ' + family + ';padding:6px 9px;border-radius:6px;white-space:pre;display:none';
+        host.appendChild(tipEl);
+      }
+      tipEl.textContent = '';
+      (t.title || []).forEach(function (s) {
+        var d = document.createElement('div'); d.style.fontWeight = 'bold'; d.textContent = s; tipEl.appendChild(d);
+      });
+      (t.body || []).forEach(function (s) {
+        if (!s) return;
+        var d = document.createElement('div'); d.textContent = s; tipEl.appendChild(d);
+      });
+      tipEl.style.display = 'block';
+      var r = canvas.getBoundingClientRect();
+      var tw = tipEl.offsetWidth, thh = tipEl.offsetHeight;
+      var x = Math.min(Math.max(2, e.clientX - r.left + 12), host.clientWidth - tw - 2);
+      var y = Math.min(Math.max(2, e.clientY - r.top + 12), host.clientHeight - thh - 2);
+      tipEl.style.left = x + 'px';
+      tipEl.style.top = y + 'px';
+    }
+
+    var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(draw) : null;
+    if (ro) ro.observe(host); else window.addEventListener('resize', draw);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerleave', hideTip);
+    draw();
+
+    return {
+      destroy: function () {
+        dead = true;
+        if (ro) ro.disconnect(); else window.removeEventListener('resize', draw);
+        canvas.removeEventListener('pointermove', onMove);
+        canvas.removeEventListener('pointerleave', hideTip);
+        if (tipEl) { tipEl.remove(); tipEl = null; }
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      },
+    };
+  }
+
+  window.DnsCharts = { bar: bar, pie: pie };
 })();

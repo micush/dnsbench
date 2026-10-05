@@ -12,9 +12,9 @@ dns[bench] is one daemon that generates DNS load against any resolver and report
 
 - **Four protocols**: UDP, TCP, DoT (DNS over TLS) and DoH (DNS over HTTPS, POST or GET, HTTP/1.1 or HTTP/2)
 - **High-rate UDP engine**: batched `sendmmsg`/`recvmmsg`, one socket per worker, a sliding window of in-flight queries
-- **Live output**: results stream to the browser line by line while the run is going
-- **Results history**: past runs with q/s, errors and p95 latency; select two or more to compare on a chart
-- **Schedules**: hourly, daily, weekly, monthly or one-off runs, in the server's local time zone
+- **Live output**: results stream line by line to their own Output tab on the Benchmark page while the run is going; when it finishes, the Results page opens with the new run highlighted
+- **Results history**: past runs with q/s, errors and p95 latency; select two or more to compare them as side-by-side pie charts that update as you tick or untick more (throughput and p95 latency, one slice per run); the best run in each pie, the highest throughput or the lowest p95, is pushed out, enlarged and outlined
+- **Schedules**: hourly, daily, weekly, monthly or one-off runs, in the server's local time zone; right-click a schedule to edit, duplicate, run, pause or delete it
 - **Login with your system accounts** through PAM, limited to the members of one group
 - **Light and dark themes** that follow your system setting automatically
 - **REST API**: everything the UI does is available to curl
