@@ -1,0 +1,49 @@
+{
+  "log_level": "info",
+  "groups": [
+    {
+      "group_id": 1,
+      "interface": "eth0",
+      "vip4": "10.0.0.53/24",
+      "priority": 100,
+      "lb_method": "roundrobin",
+      "key": "change-me",
+      "dns": {
+        "servers": ["8.8.8.8", "8.8.4.4", "9.9.9.9"],
+        "server_queries": {
+          "8.8.8.8": ["google.com", "microsoft.com"],
+          "8.8.4.4": ["apple.com", "amazon.com"],
+          "9.9.9.9": ["ford.com", "chevy.com"]
+        }
+      }
+    }
+  ],
+  "dns": {
+    "servers": ["10.0.10.1", "10.0.10.2", "10.0.20.1:5353"],
+    "queries": ["example.com", {"name": "example.com", "type": "AAAA"}],
+    "down_percent": 100,
+    "listen_port": 53,
+    "probe_interval_ms": 5000,
+    "probe_timeout_ms": 1000,
+    "query_timeout_ms": 1500,
+    "max_attempts": 3,
+    "fail_threshold": 2,
+    "latency_alpha": 0.3
+  },
+  "web": {
+    "listen": ":53853",
+    "group": "ddgw",
+    "pam_service": "ddgw",
+    "session_idle_minutes": 30,
+    "max_failed_logins": 3,
+    "failed_login_window_minutes": 1,
+    "lockout_minutes": 15,
+    "cert_file": "",
+    "key_file": ""
+  },
+  "cluster": {
+    "listen": ":53854",
+    "self": "10.0.0.5:53854",
+    "sync_interval_sec": 5
+  }
+}

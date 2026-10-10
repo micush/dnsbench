@@ -1,0 +1,7 @@
+#%PAM-1.0
+# /etc/pam.d/ddgw — RHEL / Fedora / Rocky / Alma
+# Password check for the ddgw web GUI. Group membership (default group "ddgw")
+# is enforced by ddgw itself; PAM only proves who the user is and that the
+# account is valid.
+auth       substack     system-auth
+account    include      system-auth

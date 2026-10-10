@@ -6,14 +6,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -26,41 +25,43 @@ import (
 	"time"
 )
 
-// Software updates from the web UI, after the updater in ddgw: a release archive (the
-// dnsbench_vN.tgz this project ships) is uploaded, checked and staged under STATE_DIR/update,
-// built natively on this host (the PAM binding is cgo, so a binary is only portable to a host
-// with the same libpam), started once on a spare port to prove it runs, and swapped in with a
-// re-exec. A boot guard restores the previous binary if the new one keeps failing to start.
-//
-// Unlike ddgw there is one node and no cluster, so there is no "update everyone", no queue and no
-// pulling from a peer: upload, then update this server.
-//
-// Anyone who can sign in can upload source that this host then builds and runs as root. That is
-// why ALLOW_UPDATES exists, and why every upload and update is logged with the user's name.
+// Software updates, after umiss's managerupdate: a release archive (the
+// ddgw_vN.tgz this project ships) is uploaded to any node or pulled from a
+// peer, built natively on each node (the PAM binding is cgo, so a binary is
+// only portable to a host with the same libpam), and swapped in with a re-exec.
+// A boot guard restores the previous binary if the new one keeps failing to
+// start.  Admin intent (auto-update everyone / update these nodes) is
+// replicated from the primary; history is per node.
 
 const (
-	maxSourceBytes   = 64 << 20 // unpacked
+	maxSourceBytes   = 64 << 20
 	maxSourceFile    = 16 << 20
-	maxSourceFiles   = 2000
+	maxSourceFiles   = 4000
 	maxUploadBytes   = 32 << 20
 	buildTimeout     = 10 * time.Minute
 	maxBootAttempts  = 3
 	bootConfirmAfter = 60 * time.Second
-	maxHistory       = 200
-	minGoMinorFloor  = 22 // what install.sh requires; a staged go.mod may ask for more
+	retryAfterFail   = 10 * time.Minute
+	maxHistory       = 500
 )
 
-// Overridden by tests: the real build is large and needs libpam; a test program is neither.
-var (
-	minBinarySize int64 = 1 << 20
-	requirePAM          = pamAvailable
-	smokeDeadline       = 20 * time.Second
-)
+// UpdateIntent is what an admin asked for; replicated from the primary.
+type UpdateIntent struct {
+	AutoAll bool      `json:"auto_all"`
+	Pending []string  `json:"pending"` // node addresses queued for an update
+	By      string    `json:"by,omitempty"`
+	At      time.Time `json:"at,omitempty"`
+}
 
-// UpdateEvent is one entry of the update history.
+func (i UpdateIntent) wants(addr string) bool {
+	return i.AutoAll || containsStr(i.Pending, addr)
+}
+
+// UpdateEvent is one history entry.
 type UpdateEvent struct {
 	At     time.Time `json:"at"`
-	Kind   string    `json:"kind"` // uploaded | applied | failed | rolled-back
+	Node   string    `json:"node"`
+	Kind   string    `json:"kind"` // uploaded|pulled|queued|cancelled|auto-on|auto-off|applied|failed|rolled-back
 	From   string    `json:"from,omitempty"`
 	To     string    `json:"to,omitempty"`
 	Detail string    `json:"detail,omitempty"`
@@ -77,40 +78,48 @@ type bootGuard struct {
 	At       time.Time `json:"at"`
 }
 
-// Updater owns the staged source tree, the build scratch space, the boot guard and the history.
+// Updater owns the source tree, build cache, admin intent and history.
 type Updater struct {
-	dir        string // <state>/update
-	enabled    bool
-	exePath    func() (string, error)
-	restartFn  func()                                    // leave the process so main re-execs the installed binary
-	build      func(ctx context.Context) (string, error) // the real Build unless a test replaces it
-	goCacheDir string                                    // "" = <dir>/gocache; tests share the toolchain's own cache
-	smoke      func(bin string) error                    // start the new binary once; tests may skip it
+	dir     string // <state>/update
+	exePath func() (string, error)
 
-	mu       sync.Mutex
-	hist     []UpdateEvent
-	updating bool
-	phase    string
-	waiting  string
-
-	toolMu    sync.Mutex
-	toolAt    time.Time
-	toolPath  string
-	toolErr   error
-	toolMinor int
+	mu         sync.Mutex
+	intent     UpdateIntent
+	hist       []UpdateEvent
+	failedVer  string
+	failedAt   time.Time
+	updating   bool
+	phase      string
+	lastDetail string
+	waiting    string
 }
 
-func newUpdater(stateDir string, enabled bool) *Updater {
-	u := &Updater{dir: filepath.Join(stateDir, "update"), enabled: enabled, exePath: os.Executable}
-	u.build = func(ctx context.Context) (string, error) { return u.Build(ctx) }
-	u.smoke = func(bin string) error { return smokeTest(bin, u.dir) }
+func NewUpdater(stateDir string) (*Updater, error) {
+	u := &Updater{dir: filepath.Join(stateDir, "update"), exePath: os.Executable}
+	if err := os.MkdirAll(u.dir, 0o700); err != nil {
+		return nil, err
+	}
+	u.intent.Pending = []string{}
+	if b, err := os.ReadFile(filepath.Join(u.dir, "intent.json")); err == nil {
+		json.Unmarshal(b, &u.intent)
+		if u.intent.Pending == nil {
+			u.intent.Pending = []string{}
+		}
+	} else if os.IsNotExist(err) {
+		u.intent.AutoAll = true // a fresh install updates itself; an admin's saved choice is never overridden
+	}
 	if b, err := os.ReadFile(filepath.Join(u.dir, "history.json")); err == nil {
 		json.Unmarshal(b, &u.hist)
 	}
-	return u
+	return u, nil
 }
 
 func (u *Updater) sourceDir() string { return filepath.Join(u.dir, "source") }
+
+func (u *Updater) saveIntentLocked() {
+	b, _ := json.MarshalIndent(u.intent, "", "  ")
+	writeAtomic(filepath.Join(u.dir, "intent.json"), b, 0o600)
+}
 
 func (u *Updater) addEventLocked(e UpdateEvent) {
 	if e.At.IsZero() {
@@ -120,20 +129,17 @@ func (u *Updater) addEventLocked(e UpdateEvent) {
 	if len(u.hist) > maxHistory {
 		u.hist = u.hist[len(u.hist)-maxHistory:]
 	}
-	if err := os.MkdirAll(u.dir, 0o700); err == nil {
-		b, _ := json.MarshalIndent(u.hist, "", "  ")
-		writeFileAtomic(filepath.Join(u.dir, "history.json"), b, 0o600)
-	}
+	b, _ := json.MarshalIndent(u.hist, "", "  ")
+	writeAtomic(filepath.Join(u.dir, "history.json"), b, 0o600)
 }
 
-// Record appends an event to the history.
 func (u *Updater) Record(e UpdateEvent) {
 	u.mu.Lock()
 	u.addEventLocked(e)
 	u.mu.Unlock()
 }
 
-// History returns events newest first; limit <= 0 means all of them.
+// History returns events newest first (optionally only for one node).
 func (u *Updater) History(limit int) []UpdateEvent {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -147,44 +153,79 @@ func (u *Updater) History(limit int) []UpdateEvent {
 	return out
 }
 
-func (u *Updater) historyLen() int {
+func (u *Updater) LastEvent() *UpdateEvent {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return len(u.hist)
-}
-
-func (u *Updater) Phase() string   { u.mu.Lock(); defer u.mu.Unlock(); return u.phase }
-func (u *Updater) Busy() bool      { u.mu.Lock(); defer u.mu.Unlock(); return u.updating }
-func (u *Updater) Waiting() string { u.mu.Lock(); defer u.mu.Unlock(); return u.waiting }
-
-// SetWaiting records why the installed update is not restarting yet ("" = not waiting).
-func (u *Updater) SetWaiting(why string) {
-	u.mu.Lock()
-	changed := u.waiting != why
-	u.waiting = why
-	u.mu.Unlock()
-	if changed && why != "" {
-		log.Printf("update: holding back the restart: %s", why)
+	if len(u.hist) == 0 {
+		return nil
 	}
+	e := u.hist[len(u.hist)-1]
+	return &e
 }
 
-// lastFailure is the newest history entry when it is a failed attempt, so the page can say why
-// the staged version is not installed. It is forgotten as soon as anything newer happens.
-func (u *Updater) lastFailure() *UpdateEvent {
+func (u *Updater) Intent() UpdateIntent {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if n := len(u.hist); n > 0 && u.hist[n-1].Kind == "failed" {
-		e := u.hist[n-1]
-		return &e
+	i := u.intent
+	i.Pending = append([]string{}, u.intent.Pending...)
+	return i
+}
+
+// SetIntent replaces the intent (a replica adopting the primary's).
+func (u *Updater) SetIntent(i UpdateIntent) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if i.Pending == nil {
+		i.Pending = []string{}
 	}
-	return nil
+	sort.Strings(i.Pending)
+	u.intent = i
+	u.saveIntentLocked()
 }
 
-func (u *Updater) noteFailure(from, to, detail, by string) {
+func (u *Updater) SetAuto(on bool, by, self string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.addEventLocked(UpdateEvent{Kind: "failed", From: from, To: to, Detail: detail, By: by})
-	log.Printf("update: v%s -> v%s failed: %s", from, to, detail)
+	if u.intent.AutoAll == on {
+		return
+	}
+	u.intent.AutoAll, u.intent.By, u.intent.At = on, by, time.Now().UTC()
+	u.saveIntentLocked()
+	kind := "auto-off"
+	if on {
+		kind = "auto-on"
+	}
+	infof("auto-update %s by %s", map[bool]string{true: "enabled", false: "disabled"}[on], by)
+	u.addEventLocked(UpdateEvent{Node: self, Kind: kind, By: by})
+}
+
+func (u *Updater) Push(nodes []string, by string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for _, n := range nodes {
+		if !containsStr(u.intent.Pending, n) {
+			u.intent.Pending = append(u.intent.Pending, n)
+			u.addEventLocked(UpdateEvent{Node: n, Kind: "queued", By: by})
+		}
+	}
+	sort.Strings(u.intent.Pending)
+	u.intent.By, u.intent.At = by, time.Now().UTC()
+	u.saveIntentLocked()
+}
+
+func (u *Updater) Cancel(nodes []string, by string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	kept := []string{}
+	for _, p := range u.intent.Pending {
+		if containsStr(nodes, p) {
+			u.addEventLocked(UpdateEvent{Node: p, Kind: "cancelled", By: by})
+			continue
+		}
+		kept = append(kept, p)
+	}
+	u.intent.Pending = kept
+	u.saveIntentLocked()
 }
 
 // ── versions ─────────────────────────────────────────────────────────────────
@@ -217,13 +258,63 @@ func (u *Updater) SourceVersion() string {
 	return v
 }
 
+func (u *Updater) Phase() string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.phase
+}
+
+// SetWaiting records why this node is holding back a queued update ("" = not waiting).
+func (u *Updater) SetWaiting(why string) {
+	u.mu.Lock()
+	changed := u.waiting != why
+	u.waiting = why
+	u.mu.Unlock()
+	if changed && why != "" {
+		infof("update: holding back — %s", why)
+	}
+}
+
+func (u *Updater) Waiting() string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.waiting
+}
+
+func (u *Updater) Busy() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.updating
+}
+
+// FailedFor returns the target version that last failed (within the retry
+// window), or "".
+func (u *Updater) FailedFor() string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.failedVer != "" && time.Since(u.failedAt) < retryAfterFail {
+		return u.failedVer
+	}
+	return ""
+}
+
+func (u *Updater) noteFailure(self, from, to, detail string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.failedVer, u.failedAt, u.lastDetail = to, time.Now(), detail
+	u.addEventLocked(UpdateEvent{Node: self, Kind: "failed", From: from, To: to, Detail: detail})
+	warnf("update: v%s → v%s failed: %s", from, to, detail)
+}
+
+func (u *Updater) clearFailure() {
+	u.mu.Lock()
+	u.failedVer = ""
+	u.mu.Unlock()
+}
+
 // ── source archive handling ──────────────────────────────────────────────────
 
-var (
-	versionFileRe = regexp.MustCompile(`^[0-9]+\n?$`)
-	moduleLineRe  = regexp.MustCompile(`(?m)^module\s+dnsbench\s*$`)
-	goDirectiveRe = regexp.MustCompile(`(?m)^go\s+1\.(\d+)`)
-)
+var versionFileRe = regexp.MustCompile(`^[0-9]+\n?$`)
 
 type srcFile struct {
 	name string
@@ -231,8 +322,8 @@ type srcFile struct {
 	mode fs.FileMode
 }
 
-// cleanArchiveName normalises an entry name and rejects anything that could escape the
-// directory it is unpacked into.
+// cleanArchiveName normalises an entry name and rejects anything that could
+// escape the destination.
 func cleanArchiveName(raw string) (string, error) {
 	if raw == "" || strings.ContainsAny(raw, "\x00\\") {
 		return "", fmt.Errorf("unsafe path %q in archive", raw)
@@ -376,8 +467,8 @@ func collectZip(body []byte, c *srcCollector) error {
 	return nil
 }
 
-// finishSource strips a single common top directory, drops version-control and binary leftovers
-// and checks the tree really is a dnsbench source tree.
+// finishSource strips a single common top directory, drops VCS/binary
+// leftovers and checks the tree really is a ddgw source tree.
 func finishSource(files []srcFile) ([]srcFile, error) {
 	if len(files) == 0 {
 		return nil, errors.New("archive is empty")
@@ -404,7 +495,7 @@ func finishSource(files []srcFile) ([]srcFile, error) {
 		if same {
 			name = strings.TrimPrefix(name, top+"/")
 		}
-		if name == ".git" || strings.HasPrefix(name, ".git/") || name == "dnsbench" || strings.HasSuffix(name, ".tmp") {
+		if name == ".git" || strings.HasPrefix(name, ".git/") || name == "ddgw" || strings.HasSuffix(name, ".tmp") {
 			continue
 		}
 		if seen[name] {
@@ -421,53 +512,36 @@ func finishSource(files []srcFile) ([]srcFile, error) {
 		}
 		return nil
 	}
-	if gm := get("source/go.mod"); gm == nil || !moduleLineRe.Match(gm) {
-		return nil, errors.New(`not a dnsbench source tree (source/go.mod with "module dnsbench" not found in the archive)`)
+	gm := get("source/go.mod")
+	if gm == nil || !bytes.Contains(gm, []byte("module ddgw")) {
+		return nil, errors.New("not a ddgw source tree (source/go.mod with \"module ddgw\" not found in the archive; trees before v44 had the Go files at the top and cannot be used by this version)")
 	}
 	if get("source/main.go") == nil {
-		return nil, errors.New("not a dnsbench source tree (source/main.go missing)")
+		return nil, errors.New("not a ddgw source tree (source/main.go missing)")
 	}
-	if v := get("source/VERSION"); v == nil || !versionFileRe.Match(v) {
+	v := get("source/VERSION")
+	if v == nil || !versionFileRe.Match(v) {
 		return nil, errors.New("source/VERSION missing or not a plain integer")
 	}
 	return out, nil
 }
 
-// Stage validates an uploaded archive and stages it as the source tree, replacing the previous
-// one. It returns the new VERSION. An archive that is not newer than running is refused: this
-// page only moves forward (install.sh --allow-downgrade is the way back).
-func (u *Updater) Stage(body []byte, running string) (string, error) {
-	u.mu.Lock()
-	busy := u.updating
-	u.mu.Unlock()
-	if busy {
-		return "", errors.New("an update is in progress on this server; wait for it to finish")
-	}
+// ExtractSource validates and stages an uploaded/pulled archive as the source
+// tree, replacing the previous one.  It returns the new VERSION.
+func (u *Updater) ExtractSource(body []byte) (string, error) {
 	files, err := parseSourceArchive(body)
 	if err != nil {
-		return "", err
-	}
-	var ver string
-	for _, f := range files {
-		if f.name == "source/VERSION" {
-			ver = strings.TrimSpace(string(f.data))
-		}
-	}
-	if !versionGreater(ver, running) {
-		return "", fmt.Errorf("this archive is v%s, which is not newer than the running v%s (to go back to an older release, run its install.sh with --allow-downgrade)", ver, running)
-	}
-	if err := os.MkdirAll(u.dir, 0o700); err != nil {
 		return "", err
 	}
 	tmp := filepath.Join(u.dir, "source.new")
 	os.RemoveAll(tmp)
 	for _, f := range files {
 		dst := filepath.Join(tmp, filepath.FromSlash(f.name))
-		if rel, err := filepath.Rel(tmp, dst); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if rel, err := filepath.Rel(tmp, dst); err != nil || strings.HasPrefix(rel, "..") {
 			os.RemoveAll(tmp)
 			return "", fmt.Errorf("unsafe path %q", f.name)
 		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			os.RemoveAll(tmp)
 			return "", err
 		}
@@ -489,305 +563,190 @@ func (u *Updater) Stage(body []byte, running string) (string, error) {
 		return "", err
 	}
 	os.RemoveAll(old)
+	u.clearFailure()
 	return u.SourceVersion(), nil
+}
+
+// SourceTarball packs the staged source tree (top-level "ddgw/") for a peer.
+func (u *Updater) SourceTarball() ([]byte, string, error) {
+	ver := u.SourceVersion()
+	if ver == "" {
+		return nil, "", errors.New("no source tree staged on this node")
+	}
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	root := u.sourceDir()
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: "ddgw/" + filepath.ToSlash(rel), Mode: 0o644, Size: int64(len(data)), Typeflag: tar.TypeReg, ModTime: time.Unix(0, 0)}); err != nil {
+			return err
+		}
+		_, err = tw.Write(data)
+		return err
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	tw.Close()
+	gz.Close()
+	return buf.Bytes(), ver, nil
+}
+
+// sourceFingerprint hashes the staged tree (names and contents).
+func (u *Updater) sourceFingerprint() (string, error) {
+	h := sha256.New()
+	root := u.sourceDir()
+	var names []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.Type().IsRegular() {
+			rel, _ := filepath.Rel(root, p)
+			names = append(names, rel)
+		}
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		b, err := os.ReadFile(filepath.Join(root, n))
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00", n, len(b))
+		h.Write(b)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // ── build ────────────────────────────────────────────────────────────────────
 
 var goVersionRe = regexp.MustCompile(`go version go1\.(\d+)`)
 
-// goMinorOf runs `go version` and returns the minor version of 1.x ("go1.27.1" is 27).
-func goMinorOf(bin string) (int, bool) {
+func goUsable(bin string) bool {
 	out, err := exec.Command(bin, "version").Output()
 	if err != nil {
-		return 0, false
+		return false
 	}
 	m := goVersionRe.FindStringSubmatch(string(out))
 	if m == nil {
-		return 0, false
+		return false
 	}
 	n, _ := strconv.Atoi(m[1])
-	return n, true
+	return n >= 24
 }
 
-func goUsable(bin string, minMinor int) bool {
-	n, ok := goMinorOf(bin)
-	return ok && n >= minMinor
-}
-
-// goMinor is the Go minor version the staged source asks for in go.mod (never below what
-// install.sh requires), so a release that needs a newer toolchain says so plainly.
-func (u *Updater) goMinor() int {
-	minor := minGoMinorFloor
-	if b, err := os.ReadFile(filepath.Join(u.sourceDir(), "source", "go.mod")); err == nil {
-		if m := goDirectiveRe.FindSubmatch(b); m != nil {
-			if n, _ := strconv.Atoi(string(m[1])); n > minor {
-				minor = n
-			}
-		}
+func (u *Updater) findGo() (string, error) {
+	cands := []string{}
+	if p, err := exec.LookPath("go"); err == nil {
+		cands = append(cands, p)
 	}
-	return minor
-}
-
-// Where findGo looks. Variables so tests can stand in for a host whose Go is somewhere unusual.
-//
-// The daemon runs under systemd with a default PATH, which has neither /usr/local/go/bin nor
-// /snap/bin, even though install.sh (run from a shell that has them) found the same Go. A snap puts the
-// real toolchain at /snap/go/current/bin/go (/var/lib/snapd/snap/... on Fedora-style layouts) and a
-// launcher that goes through `snap run` at /snap/bin/go. The toolchain is used directly: the launcher
-// has to set up snap confinement and cgroups first, which is what the unit's hardening is most
-// likely to get in the way of, so launchers are tried last.
-var (
-	goLookPath   = exec.LookPath
-	goGlob       = filepath.Glob
-	goFixedPaths = []string{
-		"/usr/local/go/bin/go", "/usr/bin/go", "/usr/lib/go/bin/go", "/usr/lib/golang/bin/go",
-		"/snap/go/current/bin/go", "/var/lib/snapd/snap/go/current/bin/go",
-	}
-	goGlobs        = []string{"/usr/lib/go-*/bin/go", "/snap/go/*/bin/go", "/var/lib/snapd/snap/go/*/bin/go"}
-	goSnapWrappers = []string{"/snap/bin/go", "/var/lib/snapd/snap/bin/go"}
-)
-
-func isSnapWrapper(p string) bool {
-	for _, w := range goSnapWrappers {
-		if p == w {
-			return true
-		}
-	}
-	if r, err := filepath.EvalSymlinks(p); err == nil && filepath.Base(r) == "snap" {
-		return true // a symlink to the snap command itself
-	}
-	return false
-}
-
-// goCandidates lists every go command worth trying, best first: the one on PATH, the usual
-// places, the toolchains inside snaps (newest revision first), and last the snap launchers.
-func goCandidates() []string {
-	var out, wrappers []string
-	seen := map[string]bool{}
-	add := func(list *[]string, p string) {
-		if p != "" && !seen[p] {
-			seen[p] = true
-			*list = append(*list, p)
-		}
-	}
-	if p, err := goLookPath("go"); err == nil {
-		if isSnapWrapper(p) {
-			add(&wrappers, p)
-		} else {
-			add(&out, p)
-		}
-	}
-	for _, p := range goFixedPaths {
-		add(&out, p)
-	}
-	for _, g := range goGlobs {
-		m, _ := goGlob(g)
+	cands = append(cands, "/usr/local/go/bin/go", "/usr/lib/go/bin/go", "/usr/lib/golang/bin/go", "/snap/bin/go") // /snap/bin is not on a service's PATH
+	if m, _ := filepath.Glob("/usr/lib/go-*/bin/go"); len(m) > 0 {
 		sort.Sort(sort.Reverse(sort.StringSlice(m)))
-		for _, p := range m {
-			add(&out, p)
-		}
+		cands = append(cands, m...)
 	}
-	for _, p := range goSnapWrappers {
-		add(&wrappers, p)
-	}
-	return append(out, wrappers...)
-}
-
-// goSearchedDirs is the human-readable list of where findGo looks, for the error message.
-func goSearchedDirs() string {
-	var dirs []string
-	seen := map[string]bool{}
-	for _, l := range [][]string{goFixedPaths, goGlobs, goSnapWrappers} {
-		for _, p := range l {
-			if d := filepath.Dir(p); !seen[d] {
-				seen[d] = true
-				dirs = append(dirs, d)
-			}
-		}
-	}
-	return strings.Join(dirs, ", ")
-}
-
-func findGo(minMinor int) (string, error) {
-	var tooOld []string
-	for _, c := range goCandidates() {
-		n, ok := goMinorOf(c)
-		switch {
-		case !ok:
-		case n >= minMinor:
+	cands = append(cands, "/usr/local/share/ddgw/go/bin/go")
+	for _, c := range cands {
+		if goUsable(c) {
 			return c, nil
-		default:
-			tooOld = append(tooOld, fmt.Sprintf("%s is Go 1.%d", c, n))
 		}
 	}
-	msg := fmt.Sprintf("no Go toolchain 1.%d or newer found on this server (looked on PATH and in %s", minMinor, goSearchedDirs())
-	if len(tooOld) > 0 {
-		msg += "; found, but too old: " + strings.Join(tooOld, ", ")
-	}
-	return "", fmt.Errorf("%s; install Go, or re-run install.sh)", msg)
+	return "", errors.New("no Go toolchain >= 1.24 found on this node (install Go, or re-run install.sh which keeps one under /usr/local/share/ddgw/go)")
 }
 
-// toolchain is findGo for the current staged source, remembered for 30 s because the page asks
-// every couple of seconds and each candidate costs a process start.
-func (u *Updater) toolchain() (string, error) {
-	minor := u.goMinor()
-	u.toolMu.Lock()
-	defer u.toolMu.Unlock()
-	if u.toolMinor == minor && time.Since(u.toolAt) < 30*time.Second {
-		return u.toolPath, u.toolErr
-	}
-	u.toolPath, u.toolErr = findGo(minor)
-	u.toolAt, u.toolMinor = time.Now(), minor
-	return u.toolPath, u.toolErr
-}
-
-func haveCCompiler() bool {
-	if _, err := exec.LookPath("gcc"); err == nil {
-		return true
-	}
-	_, err := exec.LookPath("cc")
-	return err == nil
-}
-
-// buildEnv is the environment install.sh builds with: no network, no toolchain download, and
-// scratch space under the update directory (the service's own /tmp is private).
-func (u *Updater) buildEnv(tmp string) []string {
-	cache := u.goCacheDir
-	if cache == "" {
-		cache = filepath.Join(u.dir, "gocache")
-	}
-	return append(os.Environ(), "CGO_ENABLED=1", "GOTOOLCHAIN=local", "GOFLAGS=-mod=readonly", "GOPROXY=off",
-		"GOCACHE="+cache, "GOPATH="+filepath.Join(u.dir, "gopath"), "HOME="+u.dir, "TMPDIR="+tmp)
-}
-
-// Build compiles the staged source natively, checks the result and returns the binary's path.
-func (u *Updater) Build(ctx context.Context) (string, error) {
-	version := u.SourceVersion()
+// Build compiles the staged source natively and returns the binary path.
+func (u *Updater) Build(ctx context.Context) (bin, version string, err error) {
+	version = u.SourceVersion()
 	if version == "" {
-		return "", errors.New("no source tree staged on this server")
+		return "", "", errors.New("no source tree staged on this node")
 	}
-	goBin, err := u.toolchain()
+	fp, err := u.sourceFingerprint()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if !haveCCompiler() {
-		return "", errors.New("no C compiler on this server (the PAM binding needs gcc and the PAM development headers; re-run install.sh)")
+	cache := filepath.Join(u.dir, "cache")
+	if err := os.MkdirAll(cache, 0o700); err != nil {
+		return "", "", err
 	}
-	out := filepath.Join(u.dir, "dnsbench.new")
-	os.Remove(out)
-	tmp := filepath.Join(u.dir, "tmp")
-	os.RemoveAll(tmp)
-	if err := os.MkdirAll(tmp, 0o700); err != nil {
-		return "", err
+	out := filepath.Join(cache, fmt.Sprintf("ddgw-v%s-%s", version, fp[:12]))
+	if checkBuilt(out, version) == nil {
+		return out, version, nil
 	}
-	defer os.RemoveAll(tmp)
+	goBin, err := u.findGo()
+	if err != nil {
+		return "", "", err
+	}
+	if _, e1 := exec.LookPath("gcc"); e1 != nil {
+		if _, e2 := exec.LookPath("cc"); e2 != nil {
+			return "", "", errors.New("no C compiler on this node (the PAM binding needs gcc and the PAM development headers)")
+		}
+	}
 	bctx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(bctx, goBin, "build", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", out, ".")
-	cmd.Dir = filepath.Join(u.sourceDir(), "source") // the Go module; the archive also holds docs/, install.sh, contrib/
-	cmd.Env = u.buildEnv(tmp)
+	tmp := out + ".tmp"
+	os.Remove(tmp)
+	cmd := exec.CommandContext(bctx, goBin, "build", "-trimpath", "-ldflags=-s -w", "-o", tmp, ".")
+	cmd.Dir = filepath.Join(u.sourceDir(), "source") // the Go module (the archive also holds docs/, install.sh, contrib/)
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=1", "GOTOOLCHAIN=local", "GOFLAGS=-mod=mod",
+		"GOCACHE="+filepath.Join(u.dir, "gocache"), "GOPATH="+filepath.Join(u.dir, "gopath"), "HOME="+u.dir)
 	if outp, err := cmd.CombinedOutput(); err != nil {
-		os.Remove(out)
+		os.Remove(tmp)
 		msg := strings.TrimSpace(string(outp))
 		if len(msg) > 1500 {
 			msg = "…" + msg[len(msg)-1500:]
 		}
-		return "", fmt.Errorf("go build failed: %v\n%s", err, msg)
+		return "", "", fmt.Errorf("go build failed: %v\n%s", err, msg)
 	}
-	if err := checkBuilt(out, version); err != nil {
-		os.Remove(out)
-		return "", err
+	if err := checkBuilt(tmp, version); err != nil {
+		os.Remove(tmp)
+		return "", "", err
 	}
-	return out, nil
+	if err := os.Rename(tmp, out); err != nil {
+		return "", "", err
+	}
+	// keep the cache small: only the newest build stays
+	if ents, err := os.ReadDir(cache); err == nil {
+		for _, e := range ents {
+			if filepath.Join(cache, e.Name()) != out {
+				os.Remove(filepath.Join(cache, e.Name()))
+			}
+		}
+	}
+	return out, version, nil
 }
 
-// checkBuilt verifies a built binary runs, reports the expected version and (like the running
-// one) has PAM linked in. It is run with an empty environment so nothing from the service's
-// configuration can change what it prints.
+// checkBuilt verifies a built binary runs, reports the expected version and
+// (like the running one) has PAM linked in.
 func checkBuilt(bin, version string) error {
 	st, err := os.Stat(bin)
-	if err != nil || st.Size() < minBinarySize {
+	if err != nil || st.Size() < 1<<20 {
 		return errors.New("built binary missing or implausibly small")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "--version")
-	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
-	b, err := cmd.Output()
+	b, err := exec.CommandContext(ctx, bin, "--version").Output()
 	if err != nil {
 		return fmt.Errorf("built binary does not run: %w", err)
 	}
-	if got := strings.TrimSpace(string(b)); got != "dnsbench "+version {
-		return fmt.Errorf("built binary reports %q, expected %q", got, "dnsbench "+version)
+	if got := strings.TrimSpace(string(b)); got != "ddgw v"+version {
+		return fmt.Errorf("built binary reports %q, expected %q", got, "ddgw v"+version)
 	}
-	if requirePAM {
+	if pamAvailable {
 		data, err := os.ReadFile(bin)
 		if err != nil || !bytes.Contains(data, []byte("libpam.so")) {
-			return errors.New("built binary has no PAM support (is the PAM development package installed?); nobody could sign in to it")
+			return errors.New("built binary has no PAM support (is the PAM development package installed?)")
 		}
 	}
 	return nil
-}
-
-// smokeTest starts the new binary on a spare loopback port with a scratch state directory and
-// waits for its login page. A build that compiles but cannot start is found here, before the
-// running binary is replaced, rather than after a restart.
-func smokeTest(bin, dir string) error {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return err
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	st, err := os.MkdirTemp(dir, "smoke-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(st)
-	var out bytes.Buffer
-	cmd := exec.Command(bin, "--no-tls", "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--state-dir", st)
-	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
-	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("the new build cannot be started: %w", err)
-	}
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-	stop := func() { cmd.Process.Kill(); <-exited }
-	tail := func() string {
-		s := strings.TrimSpace(out.String())
-		if len(s) > 800 {
-			s = "…" + s[len(s)-800:]
-		}
-		return s
-	}
-	client := &http.Client{Timeout: 2 * time.Second}
-	deadline := time.After(smokeDeadline)
-	for {
-		select {
-		case err := <-exited:
-			return fmt.Errorf("the new build exited right after starting (%v):\n%s", err, tail())
-		case <-deadline:
-			stop()
-			return fmt.Errorf("the new build did not answer on its login page within %s:\n%s", smokeDeadline, tail())
-		case <-time.After(150 * time.Millisecond):
-		}
-		resp, err := client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/login")
-		if err != nil {
-			continue
-		}
-		code := resp.StatusCode
-		resp.Body.Close()
-		stop()
-		if code != http.StatusOK {
-			return fmt.Errorf("the new build answered its login page with HTTP %d:\n%s", code, tail())
-		}
-		return nil
-	}
 }
 
 // ── apply / boot guard ───────────────────────────────────────────────────────
@@ -808,75 +767,11 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := out.Sync(); err != nil {
-		out.Close()
-		os.Remove(tmp)
-		return err
-	}
 	if err := out.Close(); err != nil {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
-}
-
-// canReplace says whether the running binary can be replaced: the directory it lives in must be
-// writable by this process. Under the shipped systemd unit that needs ReadWritePaths=/opt/dnsbench,
-// which units installed before this feature lack.
-func canReplace(exe string) error {
-	f, err := os.CreateTemp(filepath.Dir(exe), ".dnsbench-write-test-")
-	if err != nil {
-		return fmt.Errorf("cannot write to %s: %v (the systemd unit installed here mounts it read-only; run install.sh from this release once, which adds ReadWritePaths=-/opt/dnsbench, and updates from the web UI will work from then on)", filepath.Dir(exe), unwrapPathError(err))
-	}
-	name := f.Name()
-	f.Close()
-	os.Remove(name)
-	return nil
-}
-
-func unwrapPathError(err error) error {
-	var pe *fs.PathError
-	if errors.As(err, &pe) {
-		return pe.Err
-	}
-	return err
-}
-
-// relabel gives the new binary the SELinux type install.sh gives it, when SELinux is enforcing.
-// A file renamed into place otherwise keeps the type of its scratch location. Best effort.
-func relabel(bin string) {
-	ge, err := exec.LookPath("getenforce")
-	if err != nil {
-		return
-	}
-	if out, err := exec.Command(ge).Output(); err != nil || strings.TrimSpace(string(out)) != "Enforcing" {
-		return
-	}
-	cc, err := exec.LookPath("chcon")
-	if err != nil {
-		return
-	}
-	if err := exec.Command(cc, "-t", "bin_t", bin).Run(); err != nil {
-		log.Printf("update: could not set the SELinux label on %s: %v", bin, err)
-	}
-}
-
-// refreshDocs copies README.md and LICENSE.txt from the staged tree next to the binary, where
-// the in-app ReadMe and License pages read them (install.sh does the same). Best effort.
-func (u *Updater) refreshDocs(dir string) {
-	for _, name := range []string{"README.md", "LICENSE.txt"} {
-		b, err := os.ReadFile(filepath.Join(u.sourceDir(), name))
-		if err != nil {
-			continue
-		}
-		if err := writeFileAtomic(filepath.Join(dir, name), b, 0o644); err != nil {
-			log.Printf("update: could not refresh %s: %v", name, err)
-		}
-	}
+	return os.Rename(tmp, dst)
 }
 
 func (u *Updater) guardPath() string { return filepath.Join(u.dir, "guard.json") }
@@ -891,24 +786,17 @@ func (u *Updater) readGuard() (bootGuard, bool) {
 }
 
 func (u *Updater) writeGuard(g bootGuard) {
-	os.MkdirAll(u.dir, 0o700)
 	b, _ := json.MarshalIndent(g, "", "  ")
-	writeFileAtomic(u.guardPath(), b, 0o600)
+	writeAtomic(u.guardPath(), b, 0o600)
 }
 
-func (u *Updater) setPhase(p string) {
-	u.mu.Lock()
-	u.phase = p
-	u.mu.Unlock()
-}
-
-// Apply builds the staged source, proves the build starts, and replaces the running executable
-// with it. The caller restarts the process afterwards. It returns the new version.
-func (u *Updater) Apply(ctx context.Context, by string) (string, error) {
+// Apply builds the staged source and replaces the running executable with it.
+// The caller restarts the process afterwards.  Returns the new version.
+func (u *Updater) Apply(ctx context.Context, self, by string) (string, error) {
 	u.mu.Lock()
 	if u.updating {
 		u.mu.Unlock()
-		return "", errors.New("an update is already in progress on this server")
+		return "", errors.New("an update is already in progress on this node")
 	}
 	u.updating, u.phase = true, "building"
 	u.mu.Unlock()
@@ -921,60 +809,47 @@ func (u *Updater) Apply(ctx context.Context, by string) (string, error) {
 		}
 	}()
 
-	from, target := version(), u.SourceVersion()
+	from := version()
+	target := u.SourceVersion()
 	if target == "" {
 		return "", errors.New("no source tree staged: upload a release archive first")
 	}
 	if !versionGreater(target, from) {
 		return "", fmt.Errorf("the staged source (v%s) is not newer than the running version (v%s)", target, from)
 	}
+	infof("update: building v%s (running v%s) — requested by %s", target, from, by)
+	bin, _, err := u.Build(ctx)
+	if err != nil {
+		u.noteFailure(self, from, target, err.Error())
+		return "", err
+	}
 	exe, err := u.exePath()
 	if err != nil {
-		u.noteFailure(from, target, err.Error(), by)
+		u.noteFailure(self, from, target, err.Error())
 		return "", err
 	}
-	if err := canReplace(exe); err != nil { // before the long build, not after it
-		u.noteFailure(from, target, err.Error(), by)
-		return "", err
-	}
-	log.Printf("update: building v%s (running v%s), requested by %q", target, from, by)
-	bin, err := u.build(ctx)
-	if err != nil {
-		u.noteFailure(from, target, err.Error(), by)
-		return "", err
-	}
-	defer os.Remove(bin)
-	u.setPhase("testing the new build")
-	if u.smoke != nil {
-		if err := u.smoke(bin); err != nil {
-			u.noteFailure(from, target, err.Error(), by)
-			return "", err
-		}
-	}
-	u.setPhase("installing")
-	prev := filepath.Join(u.dir, "dnsbench.prev")
+	prev := filepath.Join(u.dir, "ddgw.prev")
 	if err := copyFile(exe, prev, 0o755); err != nil {
-		u.noteFailure(from, target, "cannot save the current binary: "+err.Error(), by)
+		u.noteFailure(self, from, target, "cannot save the current binary: "+err.Error())
 		return "", fmt.Errorf("cannot save the current binary for rollback: %w", err)
 	}
 	u.writeGuard(bootGuard{State: "applying", From: from, To: target, Prev: prev, Exe: exe, At: time.Now().UTC()})
 	if err := copyFile(bin, exe, 0o755); err != nil {
 		os.Remove(u.guardPath())
-		u.noteFailure(from, target, "cannot replace "+exe+": "+err.Error(), by)
+		u.noteFailure(self, from, target, "cannot replace "+exe+": "+err.Error())
 		return "", fmt.Errorf("cannot replace %s: %w", exe, err)
 	}
-	relabel(exe)
-	u.refreshDocs(filepath.Dir(exe))
+	u.clearFailure()
 	u.mu.Lock()
 	u.phase = "installed, restarting"
 	u.mu.Unlock()
 	done = true // stays "updating" until the process re-execs
-	log.Printf("update: v%s installed at %s, restarting", target, exe)
+	infof("update: v%s installed at %s — restarting", target, exe)
 	return target, nil
 }
 
-// GuardOnStart is called as early as possible after start. It returns true when the previous
-// binary has been restored and the caller must re-exec it.
+// GuardOnStart is called as early as possible after start.  It returns true
+// when the previous binary has been restored and the caller must re-exec it.
 func (u *Updater) GuardOnStart() (rolledBack bool) {
 	g, ok := u.readGuard()
 	if !ok || g.State != "applying" {
@@ -990,28 +865,32 @@ func (u *Updater) GuardOnStart() (rolledBack bool) {
 	if g.Attempts <= maxBootAttempts {
 		return false
 	}
-	log.Printf("update: v%s did not stay up (%d starts), restoring v%s", g.To, g.Attempts-1, g.From)
+	warnf("update: v%s did not stay up (%d starts) — restoring v%s", g.To, g.Attempts-1, g.From)
 	if err := copyFile(g.Prev, g.Exe, 0o755); err != nil {
-		log.Printf("update: rollback failed: %v", err)
+		errorf("update: rollback failed: %v", err)
 		return false
 	}
 	g.State = "rolled-back"
 	u.writeGuard(g)
-	u.Record(UpdateEvent{Kind: "rolled-back", From: g.To, To: g.From,
+	u.Record(UpdateEvent{Node: "local", Kind: "rolled-back", From: g.To, To: g.From,
 		Detail: fmt.Sprintf("v%s failed to stay running (%d starts)", g.To, g.Attempts-1)})
 	return true
 }
 
-// GuardConfirm marks a freshly applied update as good once it has run long enough.
-func (u *Updater) GuardConfirm() {
+// GuardConfirm marks a freshly applied update as good once it has run long
+// enough.
+func (u *Updater) GuardConfirm(self string) {
 	g, ok := u.readGuard()
 	if !ok || g.State != "applying" || g.To != version() {
 		return
 	}
 	g.State = "ok"
 	u.writeGuard(g)
-	u.Record(UpdateEvent{Kind: "applied", From: g.From, To: g.To})
-	log.Printf("update: v%s confirmed (up for %s)", g.To, bootConfirmAfter)
+	u.Record(UpdateEvent{Node: self, Kind: "applied", From: g.From, To: g.To})
+	u.mu.Lock()
+	u.updating = false
+	u.mu.Unlock()
+	infof("update: v%s confirmed (up for %s)", g.To, bootConfirmAfter)
 }
 
 // RolledBackNotice reports a rollback that happened at the last start.
