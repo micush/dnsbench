@@ -52,6 +52,13 @@ func TestShippedReadmeRenders(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdownSkipsImages(t *testing.T) {
+	out := renderMarkdown("Before.\n\n![Results](snaps/results.png)\n\nAfter.")
+	if strings.Contains(out, "snaps/") || strings.Contains(out, "![") || !strings.Contains(out, "<p>Before.</p>") || !strings.Contains(out, "<p>After.</p>") {
+		t.Fatalf("image line should vanish and leave the text around it intact: %q", out)
+	}
+}
+
 // ── Config ───────────────────────────────────────────────────────────────────
 
 func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }

@@ -97,6 +97,11 @@ func renderMarkdown(md string) string {
 			}
 			tag := []string{"", "h3", "h4", "h5", "h6"}[n]
 			out.WriteString("<" + tag + ` class="mt-4">` + inlineMD(strings.TrimSpace(trimmed[n:])) + "</" + tag + ">\n")
+		case strings.HasPrefix(trimmed, "![") && strings.HasSuffix(trimmed, ")"):
+			// Screenshots are for people reading the README on a code host; the in-app
+			// page cannot serve them, so they are left out rather than shown as raw text.
+			flushPara()
+			closeList()
 		case strings.HasPrefix(trimmed, "---") || strings.HasPrefix(trimmed, "───"):
 			flushPara()
 			closeList()

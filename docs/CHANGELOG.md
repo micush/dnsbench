@@ -1,5 +1,27 @@
 # Changelog
 
+## [v11] - 2026-10-10 — Schedule a result with one click; a README written for people
+
+### Added
+- **A calendar icon on every result card** (left of the Output and re-run icons) opens the schedule editor pre-filled from that run: server, protocol, workers, queue, duration, query type, recursion and the query list. The editor is titled "Schedule This Job", the name is left blank for you to fill in, it defaults to daily at 02:00, and nothing is saved until you press Save Schedule. It works on cards with statistics and on cards without (killed or failed runs), and is hidden while a run is still going or when the run has no saved settings. It does not navigate away: you stay on Results behind the dialog.
+  - `scheduleFromRun()` and a `'run'` mode on `openSchedModal()` in `bench.html`; the new `calendar-plus` icon is drawn in `contrib/icons/gen.py` (38 icons) and written into `ui.css` by that script.
+- Screenshots in `snaps/` (sign-in, Benchmark, Results, a three-way comparison, the schedule editor opened from a result, Schedules, Updates), taken from a running build in Chromium.
+
+### Changed
+- **README rewritten** in plainer language, with the screenshots placed beside the section each one shows, and new short sections on running a first benchmark, reading the results and scheduling a test. The technical content (settings, API fields, limits, upgrade notes) is unchanged. Headings were renamed in places ("Who can sign in", "Updating from the web page", ...), so the cross-references inside the README were updated with them.
+- **The in-app ReadMe page skips image lines.** It cannot serve the files in `snaps/`, so a line that is only an image (`![alt](path)`) is now left out instead of being shown as raw text. The text around it is unaffected.
+
+### Verified
+- Full release process on the final tree: `gofmt -l` (nothing), `go vet`, `go build -buildvcs=false`, `go test -race -count=1`, `CGO_ENABLED=0` vet and `go test -count=1`, cross-compile for linux/amd64, arm64, arm, 386, riscv64, ppc64le, s390x, loong64 and mips, mipsle, mips64, mips64le.
+- New test: `TestRenderMarkdownSkipsImages` (an image line vanishes; the paragraphs before and after it are intact). `TestShippedReadmeRenders` passes on the new README.
+- `contrib/uitest/ui.js` in real Chromium, light and dark, all checks passing, including a new one that clicks the calendar icon on the first result and checks the dialog title, that no schedule id is set (so Save adds rather than updates), the server and protocol carried over, and that the page is still Results.
+- The screenshots were taken from that build with a real PAM sign-in against a loopback responder.
+
+### Not verified
+- Firefox and Safari. Chromium only.
+- The numbers in the screenshots (about 150k to 230k q/s on one shared vCPU against a loopback responder) are from this sandbox and say nothing about your hardware.
+- CodeQL was not re-run. Only a markdown renderer branch (`docs.go`) and front-end markup changed; no request-sending or input-handling code did.
+
 ## [v10] - 2026-10-05 — The Updates page finds a Go installed as a snap
 
 ### Fixed

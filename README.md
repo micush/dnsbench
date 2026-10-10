@@ -1,124 +1,170 @@
 # dns[bench]
 
-**A DNS benchmark with a browser UI and a REST API.**
+**Find out how fast a DNS server really is.**
 
-dns[bench] is one daemon that generates DNS load against any resolver and reports throughput, latency percentiles and response codes. Drive it from the web UI or from curl, run benchmarks on a schedule, and compare runs side by side.
+dns[bench] throws DNS queries at any resolver and tells you how many it answered per second, how long the slowest ones took, and how many failed. You run it from a web page, or from curl if you prefer. You can save a test to repeat on a schedule, and you can put two or more results side by side to see which server is better.
 
----
-![Benchmarking results](snaps/results.png)
----
+It is a single program that you build and run on a Linux box. There is nothing to download from anywhere else and no outside code to trust: it uses only Go's standard library.
 
-## Features
-
-- **Four protocols**: UDP, TCP, DoT (DNS over TLS) and DoH (DNS over HTTPS, POST or GET, HTTP/1.1 or HTTP/2)
-- **High-rate UDP engine**: batched `sendmmsg`/`recvmmsg`, one socket per worker, a sliding window of in-flight queries
-- **Live output**: results stream line by line to their own Output tab on the Benchmark page while the run is going; when it finishes, the Results page opens with the new run highlighted
-- **Results history**: past runs with q/s, errors and p95 latency; tick two or more and they are compared automatically as side-by-side pie charts that update as you tick or untick more (throughput and p95 latency, one slice per run); the best run in each pie, the highest throughput or the lowest p95, is pushed out, enlarged and outlined
-- **Schedules**: hourly, daily, weekly, monthly or one-off runs, in the server's local time zone; right-click a schedule to edit, duplicate, run, pause or delete it
-- **Update from the web UI**: upload a newer release archive on the Updates page; the server builds it, starts it once to check it works, installs it and restarts, and rolls back by itself if it fails to stay up
-- **Login with your system accounts** through PAM, limited to the members of one group
-- **Light and dark themes** that follow your system setting automatically
-- **REST API**: everything the UI does is available to curl
-- **Built from source on the target machine**: no prebuilt binary to trust, standard library only
+![The Results page, with a freshly finished run](snaps/results.png)
 
 ---
 
-## Install
+## What it can do
 
-You need a Linux host with systemd. As root, from the extracted project directory:
+- **Test four kinds of DNS**: plain UDP and TCP, DNS over TLS (DoT), and DNS over HTTPS (DoH, with POST or GET, over HTTP/1.1 or HTTP/2).
+- **Push UDP hard.** The UDP engine sends and receives in batches (`sendmmsg` and `recvmmsg`), so a single machine can generate a lot of load.
+- **Watch it happen.** Output streams to the Output tab while a test runs. When it finishes, the Results page opens with your new run highlighted.
+- **Keep a history.** Every run is saved with its throughput, errors and p95 latency. Tick two or more and they are compared automatically, as pie charts that change as you tick and untick. The best run in each chart is pulled out and outlined.
+- **Run it again, or schedule it.** The circular arrow on a result repeats that test. The calendar icon opens the schedule editor, already filled in with that run's settings.
+- **Schedule tests.** Hourly, daily, weekly, monthly or once, in the server's local time. Right-click a schedule to edit, duplicate, run, pause or delete it.
+- **Update from the browser.** Upload a newer release on the Updates page and the server builds it, checks it starts, installs it and restarts. If the new version won't stay up, it goes back to the old one by itself.
+- **Sign in with your Linux accounts**, through PAM, limited to the members of one group.
+- **Light and dark themes** that follow your system setting.
+- **A REST API** that does everything the web page does.
+
+---
+
+## Installing
+
+You need a Linux machine with systemd. From the unpacked project folder, run:
 
 ```bash
 sudo bash install.sh
 ```
 
-The installer:
+The installer does five things:
 
-1. Installs what it needs to build: a C compiler and the PAM development headers through your package manager (apt, dnf/yum and pacman are supported), and, only if the system has no Go 1.22 or newer, the official Go toolchain, checksum-verified and used for this build alone
-2. Compiles the source in `source/`
-3. Installs the program to `/opt/dnsbench/`, a default config to `/etc/dnsbench/dnsbench.conf`, a PAM service to `/etc/pam.d/dnsbench`, and the systemd unit
-4. Creates the `dnsbench` group and adds the user who ran the installer to it (the person behind `sudo`; root is never added automatically)
-5. Starts the service and checks that it answers; if an upgrade does not come up, it puts the previous version back
+1. Installs what it needs to build the program: a C compiler and the PAM development headers (it knows apt, dnf/yum and pacman). If your system has no Go 1.22 or newer, it also fetches the official Go toolchain, checks its checksum and uses it for this build only.
+2. Compiles the source in `source/`.
+3. Puts the program in `/opt/dnsbench/`, a default config in `/etc/dnsbench/dnsbench.conf`, a PAM service in `/etc/pam.d/dnsbench`, and the systemd unit in place.
+4. Creates a `dnsbench` group and adds you to it. That means the person who ran `sudo`. Root is never added automatically.
+5. Starts the service and checks that it answers. If an upgrade doesn't come up, it puts the old version back.
 
-Then open `https://your-server:8453` and sign in with your own account on that host, the one that ran the installer. The first start generates a self-signed certificate, so your browser warns once.
+When it's done, open `https://your-server:8453` and sign in with your own account on that machine. The first start makes a self-signed certificate, so your browser will warn you once.
 
-Useful options: `--dry-run` shows what would happen and changes nothing, `--no-start` installs without starting, `--allow-downgrade` permits installing an older version over a newer one. Run it again at any time to upgrade; your config is kept.
+![The sign-in page](snaps/login.png)
+
+A few options are worth knowing. `--dry-run` shows what would happen without changing anything. `--no-start` installs but doesn't start the service. `--allow-downgrade` lets you install an older version over a newer one. You can run the installer again whenever you like to upgrade, and your config is kept.
 
 ---
 
-## Configuration
+## Running your first benchmark
 
-Edit `/etc/dnsbench/dnsbench.conf` (plain `KEY=value` lines), then `systemctl restart dnsbench`.
+Open **Benchmark**, type the address of the DNS server you want to test, pick a protocol, and press **Run Benchmark**. The defaults are sensible: workers and queue size are chosen from your CPU count, and the query list is three well-known names. Change the list on the right if you want to test with your own domains.
 
-| Setting | Default | Meaning |
+![The Benchmark page](snaps/benchmark.png)
+
+You can run for a set number of queries or for a fixed time, and you can cap the rate if you don't want to flood the server. The Output tab shows what's happening as it runs.
+
+---
+
+## Reading the results
+
+When a run ends, the Results page opens. Each card shows the server, the protocol, queries per second, p95 latency (95% of answers were faster than this) and the success rate. The colours tell you at a glance how it went:
+
+- **Green**: p95 under 20 ms and errors under 0.1%
+- **Amber**: p95 between 20 and 50 ms, or errors between 0.1% and 1%
+- **Red**: p95 over 50 ms, or errors over 1%
+
+Every query that is sent is counted, and one that never gets an answer counts as an error. A dead server therefore shows up as errors and never as a run that looks successful.
+
+To compare runs, tick two or more. The comparison appears on its own, and it follows your ticks. You can export everything as CSV, add a note to any run, and remove the ones you no longer want.
+
+![Three runs ticked and compared](snaps/compare.png)
+
+---
+
+## Scheduling a test
+
+The quickest way to schedule a test is to start from one that already ran. Press the calendar icon on a result and the schedule editor opens with the same server, protocol, workers and queries already filled in. Give it a name, choose when it should run, and press **Save Schedule**. Nothing is saved until you do.
+
+![The schedule editor, filled in from a result](snaps/schedule-from-result.png)
+
+You can also press **Add Schedule** on the Schedules page and start from a blank form. Schedules can run hourly, daily, weekly, monthly or once. Times are in the server's local time zone, and daylight saving changes won't make them drift. A monthly schedule set for the 31st runs on the last day of shorter months.
+
+![The Schedules page](snaps/schedules.png)
+
+Right-click a schedule to edit, duplicate, run it now, pause it or delete it. Tick several to pause, resume or delete them together. The results of scheduled runs show up on the Results page too.
+
+---
+
+## Settings
+
+Edit `/etc/dnsbench/dnsbench.conf`, which is plain `KEY=value` lines, then run `systemctl restart dnsbench`.
+
+| Setting | Default | What it does |
 |---|---|---|
-| `LISTEN_HOST` | `0.0.0.0` | Address the UI and API listen on |
-| `LISTEN_PORT` | `8453` | Port for the UI and API |
-| `TLS_CERT`, `TLS_KEY` | blank | PEM certificate and key; blank means a self-signed certificate is generated |
-| `NO_TLS` | `false` | Serve plain HTTP (only behind a TLS-terminating proxy) |
-| `STATE_DIR` | `/var/lib/dnsbench` | Where the generated certificate and the schedules are kept |
-| `SCHEDULES_FILE` | blank | Schedules file; blank means `STATE_DIR/schedules.json` |
-| `PAM_SERVICE` | blank | PAM service name; blank means `/etc/pam.d/dnsbench` |
-| `LOGIN_GROUP` | `dnsbench` | Only members of this group may sign in |
-| `ALLOW_UPDATES` | `true` | Let signed-in users update dnsbench from the Updates page; `false` switches that off (see the section Updating from the web UI). Anything but true or false stops the service from starting |
+| `LISTEN_HOST` | `0.0.0.0` | The address the web page and API listen on |
+| `LISTEN_PORT` | `8453` | The port they listen on |
+| `TLS_CERT`, `TLS_KEY` | blank | Your own PEM certificate and key. Blank means a self-signed one is made for you |
+| `NO_TLS` | `false` | Serve plain HTTP. Only do this behind a proxy that handles TLS |
+| `STATE_DIR` | `/var/lib/dnsbench` | Where the certificate and the schedules are kept |
+| `SCHEDULES_FILE` | blank | Where schedules are stored. Blank means `STATE_DIR/schedules.json` |
+| `PAM_SERVICE` | blank | The PAM service name. Blank means `/etc/pam.d/dnsbench` |
+| `LOGIN_GROUP` | `dnsbench` | Only members of this group can sign in |
+| `ALLOW_UPDATES` | `true` | Whether signed-in users can update dnsbench from the Updates page. `false` turns it off (see Updating from the web page). Anything other than `true` or `false` stops the service from starting |
 
-Each setting also exists as a command-line flag (`--host`, `--port`, `--tls-cert`, `--tls-key`, `--no-tls`, `--state-dir`, `--schedules-file`, `--pam-service`, `--login-group`), and flags win over the config file. `dnsbench --help` lists them and `dnsbench --version` prints the version.
+Every setting also has a command-line flag (`--host`, `--port`, `--tls-cert`, `--tls-key`, `--no-tls`, `--state-dir`, `--schedules-file`, `--pam-service`, `--login-group`), and a flag beats the config file. `dnsbench --help` lists them all and `dnsbench --version` prints the version.
 
 ---
 
-## TLS
+## HTTPS and certificates
 
-With `TLS_CERT` and `TLS_KEY` blank, dnsbench creates a self-signed certificate (valid ten years, covering localhost, the host name and the host's addresses) on first start and reuses it afterwards.
+If you leave `TLS_CERT` and `TLS_KEY` blank, dnsbench makes a self-signed certificate the first time it starts and reuses it from then on. It is valid for ten years and covers localhost, the machine's name and its addresses.
 
-To use your own certificate, for example one from Let's Encrypt:
+If you'd rather use your own, for example one from Let's Encrypt, point the config at it:
 
 ```ini
 TLS_CERT=/etc/letsencrypt/live/bench.example.com/fullchain.pem
 TLS_KEY=/etc/letsencrypt/live/bench.example.com/privkey.pem
 ```
 
-A renewed certificate file is picked up within about ten seconds, with no restart. If the new files are unreadable or broken, the previous certificate keeps being served.
+When the certificate is renewed, dnsbench notices within about ten seconds and starts using it, with no restart. If the new files can't be read or are broken, it keeps serving the old certificate.
 
 ---
 
-## Authentication
+## Who can sign in
 
-Signing in takes two things: a correct password, and membership of the login group.
+Signing in takes two things: the right password, and membership of the login group.
 
-1. **Password.** Checked by PAM, so any account that can authenticate on the host qualifies, and expired or locked accounts are refused. The service name is `dnsbench`; edit `/etc/pam.d/dnsbench` to change how passwords are checked, for example to use LDAP or SSSD by replacing the two `pam_unix` lines with your site's stack.
-2. **Group.** The account must also belong to the group named by `LOGIN_GROUP` in the config, which is `dnsbench` by default. The installer creates that group and adds the user who ran it.
+1. **The password** is checked by PAM, so any account that can log in to the machine qualifies. Expired and locked accounts are refused. The PAM service is called `dnsbench`. To check passwords some other way, such as LDAP or SSSD, edit `/etc/pam.d/dnsbench` and swap the two `pam_unix` lines for your site's setup.
+2. **The group** is whatever `LOGIN_GROUP` names in the config, `dnsbench` by default. The installer creates it and adds the person who ran it.
 
-Anyone who can sign in can make this host send DNS traffic anywhere, which is why the group exists: being able to log in to the machine is not enough.
+The group is there on purpose. Anyone who can sign in can make this machine send DNS traffic anywhere, so being able to log in to the machine isn't enough.
 
-To let someone in, or to remove them:
+To let someone in, or take them out:
 
 ```bash
-sudo usermod -aG dnsbench alice        # allow
-sudo gpasswd -d alice dnsbench         # remove
+sudo usermod -aG dnsbench alice        # let alice in
+sudo gpasswd -d alice dnsbench         # take her out again
 ```
 
-Membership is checked at every sign-in, so a change applies immediately, with no restart; sessions that are already open stay valid until they expire or the user signs out. Both a user's primary group and their supplementary groups count, and with LDAP or SSSD the group can come from the directory. If you set `LOGIN_GROUP` to a group of your own, the installer leaves it and its members alone, and you manage them. If the group does not exist, nobody can sign in, and the service log says why.
+Membership is checked on every sign-in, so changes apply straight away and nothing needs restarting. People who are already signed in stay signed in until their session runs out or they sign out. Both a person's main group and their extra groups count, and with LDAP or SSSD the group can come from your directory. If you set `LOGIN_GROUP` to a group of your own, the installer leaves that group and its members alone and you look after them. If the group doesn't exist, nobody can sign in, and the service log says why.
 
-A person who has the right password but is not in the group sees the same "Invalid login attempt" message as for a wrong password; the reason is only in the log (`journalctl -u dnsbench`), and a wrong password never reveals whether the account is in the group.
+Someone with the right password who isn't in the group sees the same "Invalid login attempt" message as someone with the wrong password. The real reason is only in the log (`journalctl -u dnsbench`), so a wrong password never reveals whether an account is in the group.
 
-How sessions and logins behave:
+A few other things about sign-in:
 
-- Eight failed logins from one address within five minutes, counting refusals for group membership, block further attempts from it until the window passes (HTTP 429)
-- Sessions last 60 minutes, and are extended automatically while one of that user's benchmarks is running
-- The cookie is `HttpOnly`, `SameSite=Strict`, and `Secure` when TLS is on
-- State-changing requests that the browser marks as cross-site, or that carry a foreign `Origin` header, are refused (HTTP 403). Behind a reverse proxy, pass the original `Host` header through
-- Scripts can use the token from `POST /api/login` in an `X-Session-Token` header instead of the cookie
+- Eight failed attempts from one address within five minutes, counting refusals for group membership, block that address until the window passes (HTTP 429).
+- A session lasts 60 minutes. It is extended automatically while one of that person's benchmarks is running.
+- The cookie is `HttpOnly` and `SameSite=Strict`, and also `Secure` when TLS is on.
+- Requests that change something are refused (HTTP 403) if the browser marks them as cross-site or they carry a foreign `Origin` header. Behind a reverse proxy, pass the original `Host` header through.
+- Scripts can take the token from `POST /api/login` and send it in an `X-Session-Token` header instead of using the cookie.
 
-Also bind `LISTEN_HOST` to a management address if you can.
+If you can, also set `LISTEN_HOST` to a management address so the page isn't reachable from everywhere.
 
 ---
 
-## Appearance
+## Themes
 
-The pages follow your system's light or dark setting automatically, switch when it changes while the page is open, and have no flash of the wrong theme on load. The theme button (bottom left in the app, top right on the login page) cycles Auto, Light and Dark; a Light or Dark choice is remembered by that browser, and choosing Auto goes back to following the system.
+The pages follow your system's light or dark setting. They switch when it changes, even while the page is open, and don't flash the wrong colours while loading. The theme button (bottom left in the app, top right on the sign-in page) cycles through Auto, Light and Dark. Your Light or Dark choice is remembered by that browser, and choosing Auto goes back to following the system.
 
-## Internet access
+## Does it need the internet?
 
-dnsbench itself needs none. The web interface, including its icons and charts, is built into the binary and loads no fonts, scripts, styles or images from other sites, so it works on an isolated network; the REST API never needed one either. The installer uses the network only to install missing build packages (a C compiler, the PAM headers and Go) through your package manager. Install those first, or set `DNSBENCH_SKIP_DEPS=1`, and it builds offline.
+Not at all. The web page, including its icons and charts, is built into the program and loads no fonts, scripts, styles or images from other sites, so it works on an isolated network. The REST API never needed the internet either.
+
+Only the installer touches the network, and only to install missing build packages (a C compiler, the PAM headers and Go) through your package manager. Install those first, or set `DNSBENCH_SKIP_DEPS=1`, and it builds offline.
 
 ---
 
@@ -126,24 +172,24 @@ dnsbench itself needs none. The web interface, including its icons and charts, i
 
 | Protocol | Default port | Notes |
 |---|---|---|
-| UDP | 53 | Batched sends and receives; the `pipeline` setting is the in-flight window per worker |
-| TCP | 53 | One persistent connection per worker; reconnects if the server closes it |
-| DoT | 853 | TLS over TCP; the server name for certificate checks is the host you typed |
+| UDP | 53 | Sends and receives in batches. The `pipeline` setting is how many queries each worker keeps in flight |
+| TCP | 53 | One lasting connection per worker, reopened if the server closes it |
+| DoT | 853 | TLS over TCP. Certificates are checked against the host name you typed |
 | DoH | 443 | POST or GET, HTTP/1.1 or HTTP/2, one connection per worker |
 
-DoQ (DNS over QUIC) is not supported: QUIC is not in Go's standard library and this project deliberately has no other dependencies.
+DNS over QUIC (DoQ) isn't supported. QUIC isn't in Go's standard library, and this project deliberately has no other dependencies.
 
-The server can be written as `host`, `host:port`, `[ipv6]:port`, or for DoH a full URL such as `https://dns.example/dns-query`. The name is resolved once at the start of a run and every worker connects to that address. For DoH the request goes to that resolved address, and the name you typed is sent as the `Host` header and as the TLS server name, so certificate checks and virtual hosting behave as if you had connected by name.
+You can write the server as `host`, `host:port` or `[ipv6]:port`. For DoH you can also give a full URL such as `https://dns.example/dns-query`. The name is looked up once when a run starts, and every worker connects to that address. For DoH the request goes to that address, while the name you typed is sent as the `Host` header and as the TLS server name, so certificate checks and virtual hosting behave just as if you had connected by name.
 
-A server string is checked before anything is sent: the port must be a number from 1 to 65535, the host an IP address or a plain name (no `@`, `/`, `?`, `#`, spaces or other URL characters), and a DoH path must start with `/` and contain no control characters. Anything else is refused with HTTP 400 and a message such as `invalid port` or `invalid server`, for a job and for a schedule alike.
+The server string is checked before anything is sent. The port must be a number from 1 to 65535, the host must be an IP address or a plain name (no `@`, `/`, `?`, `#`, spaces or other URL characters), and a DoH path must start with `/` and have no control characters. Anything else is refused with HTTP 400 and a message such as `invalid port` or `invalid server`, whether it was meant for a job or a schedule.
 
 ---
 
-## REST API
+## The REST API
 
-Everything the browser does is an HTTP call, and all of them (except login) need a session: the cookie, or the `X-Session-Token` header.
+Everything the web page does is an HTTP call. Apart from login, every call needs a session, either the cookie or the `X-Session-Token` header.
 
-### Login
+### Logging in
 
 ```bash
 BASE=https://localhost:8453
@@ -152,9 +198,9 @@ TOK=$(curl -sk $BASE/api/login -H 'Content-Type: application/json' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 ```
 
-A wrong password returns 401, and a blocked address returns 429. `POST /api/logout` ends the session.
+A wrong password gets a 401, and an address that has been blocked gets a 429. `POST /api/logout` ends the session.
 
-### Start a benchmark
+### Starting a benchmark
 
 ```bash
 JOB=$(curl -sk $BASE/api/start-job -H 'Content-Type: application/json' \
@@ -170,30 +216,30 @@ JOB=$(curl -sk $BASE/api/start-job -H 'Content-Type: application/json' \
   }' | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
 ```
 
-Only one benchmark runs at a time: starting a job stops any job that is still running. Numbers and booleans may be sent as JSON numbers and booleans or as strings.
+Only one benchmark runs at a time. Starting a new one stops any that is still running. Numbers and booleans can be sent either as real JSON numbers and booleans or as strings.
 
-| Field | Default | Description |
+| Field | Default | What it means |
 |---|---|---|
-| `server` | required | Target address, `host:port`, or DoH URL |
+| `server` | required | The target: an address, `host:port`, or a DoH URL |
 | `protocol` | `udp` | `udp`, `tcp`, `dot` or `doh` |
 | `query_type` | `A` | `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `SRV`, `PTR` or `ANY` |
-| `concurrency` | auto | Workers: one less than the CPU count, between 1 and 32 (maximum 4096) |
-| `pipeline` | auto | UDP in-flight queries per worker: twice the CPU count, between 1 and 64 (maximum 4096) |
-| `count` | `100` | Queries per worker, used when `duration` is empty |
-| `duration` | empty | Run for a fixed time: `30s`, `2m`, `1h`, or a bare number of seconds |
-| `rate_limit` | `0` | Total queries per second across all workers; 0 means unlimited |
+| `concurrency` | auto | Number of workers. Auto is one less than your CPU count, between 1 and 32. The most you can ask for is 4096 |
+| `pipeline` | auto | UDP queries in flight per worker. Auto is twice your CPU count, between 1 and 64. The most you can ask for is 4096 |
+| `count` | `100` | Queries per worker. Used when `duration` is empty |
+| `duration` | empty | Run for a fixed time: `30s`, `2m`, `1h`, or just a number of seconds |
+| `rate_limit` | `0` | Total queries per second across all workers. 0 means no limit |
 | `recurse` | `true` | Set the recursion-desired bit |
-| `insecure` | `true` | Skip TLS certificate verification (DoT and DoH) |
+| `insecure` | `true` | Skip TLS certificate checks (DoT and DoH) |
 | `doh_method` | `post` | `post` or `get` |
 | `doh_protocol` | `1.1` | `1.1` or `2` |
-| `queries` | three sample names | Domain names, one per line (commas also work). A `PTR` query accepts a bare IP address |
+| `queries` | three sample names | Domain names, one per line (commas work too). A `PTR` query accepts a bare IP address |
 
-The rate limit is divided evenly across workers and rounded up, so the effective rate can be slightly higher; the run header shows the effective value.
+The rate limit is shared out evenly between workers and rounded up, so the real rate can be a little higher. The header at the top of a run shows the value actually used.
 
-### Follow a job
+### Following a job
 
 ```bash
-# Live plain text; blocks until the job finishes
+# Live plain text. Waits until the job finishes
 curl -sN "$BASE/api/job/$JOB/output" -H "X-Session-Token: $TOK" -k
 
 # Status as JSON
@@ -203,15 +249,15 @@ curl -sk "$BASE/api/job/$JOB" -H "X-Session-Token: $TOK"
 curl -sk -X POST "$BASE/api/job/$JOB/kill" -H "X-Session-Token: $TOK"
 ```
 
-`GET /api/job/{id}/stream` is the same output as server-sent events, which is what the browser uses. A late subscriber still receives every line from the start. `GET /api/jobs` lists the jobs the server still remembers.
+`GET /api/job/{id}/stream` gives the same output as server-sent events, which is what the browser uses. Someone who connects late still gets every line from the start. `GET /api/jobs` lists the jobs the server still remembers.
 
 ### Updates
 
-| Request | Purpose |
+| Request | What it does |
 |---|---|
-| `GET /api/update` | Running and staged versions, anything that blocks an update, and the history (newest 50) |
-| `POST /api/update/upload` | Body: the release archive itself (`.tgz` or `.zip`, at most 32 MB). Checks and stages it; returns its `version` |
-| `POST /api/update/apply` | Build the staged release and restart into it. Answers `409` with `needs_confirm` when a benchmark is running; repeat with `{"force": true}` to go ahead anyway |
+| `GET /api/update` | Shows the running and staged versions, anything that blocks an update, and the history (newest 50) |
+| `POST /api/update/upload` | The body is the release archive itself (`.tgz` or `.zip`, at most 32 MB). It is checked and staged, and its `version` is returned |
+| `POST /api/update/apply` | Builds the staged release and restarts into it. Answers `409` with `needs_confirm` if a benchmark is running. Repeat with `{"force": true}` to go ahead anyway |
 
 ```bash
 curl -sk -H "X-Session-Token: $TOKEN" -H 'Content-Type: application/octet-stream' \
@@ -219,118 +265,122 @@ curl -sk -H "X-Session-Token: $TOKEN" -H 'Content-Type: application/octet-stream
 curl -sk -H "X-Session-Token: $TOKEN" -X POST https://host:8453/api/update/apply
 ```
 
-Both writes answer `403` when `ALLOW_UPDATES=false`. The server restarts a moment after `apply` succeeds, and every session ends with it, so sign in again to see the result.
+Both writes answer `403` when `ALLOW_UPDATES=false`. The server restarts a moment after `apply` succeeds and every session ends with it, so sign in again to see the result.
 
 ### Schedules
 
-| Request | Purpose |
+| Request | What it does |
 |---|---|
-| `GET /api/schedules` | List schedules |
-| `POST /api/schedules/add` | Create one; returns its `id` |
-| `POST /api/schedules/update` | Change fields of the schedule named by `id` |
-| `POST /api/schedules/delete` | Delete by `id` |
-| `POST /api/schedules/pause`, `/resume` | Pause or resume by `id` |
-| `POST /api/schedules/run` | Run now by `id`; returns the `job_id` |
-| `GET /api/scheduler-history` | Results of recent scheduled runs, newest first (last 500) |
+| `GET /api/schedules` | Lists schedules |
+| `POST /api/schedules/add` | Creates one and returns its `id` |
+| `POST /api/schedules/update` | Changes fields on the schedule with that `id` |
+| `POST /api/schedules/delete` | Deletes by `id` |
+| `POST /api/schedules/pause`, `/resume` | Pauses or resumes by `id` |
+| `POST /api/schedules/run` | Runs one now by `id` and returns the `job_id` |
+| `GET /api/scheduler-history` | Results of recent scheduled runs, newest first (the last 500) |
 
-A schedule takes `name`, `server`, `protocol`, `concurrency`, `pipeline`, `duration`, `queries`, `qtype`, `recurse`, and its timing: `freq` (`hourly`, `daily`, `weekly`, `monthly` or `once`) with `minute`, `hour`, `weekday` (0 is Sunday) and `monthday` as needed. For `once`, give `run_at` as server-local `YYYY-MM-DDTHH:MM`. A monthly schedule on day 31 runs on the last day of shorter months. Empty `concurrency` and `pipeline` mean auto. Times are in the server's local time zone, and daylight saving changes cannot make them drift.
+A schedule takes `name`, `server`, `protocol`, `concurrency`, `pipeline`, `duration`, `queries`, `qtype` and `recurse`, plus its timing. For the timing, set `freq` to `hourly`, `daily`, `weekly`, `monthly` or `once`, and add `minute`, `hour`, `weekday` (0 is Sunday) and `monthday` as needed. For `once`, give `run_at` in the server's local time as `YYYY-MM-DDTHH:MM`. Leave `concurrency` and `pipeline` empty for auto.
 
 ---
 
-## Concurrency model
+## Workers and pipelines
 
-Two settings control the load.
+Two settings control how much load you create.
 
-**`concurrency`** is the number of workers. Each worker owns its own socket or connection and runs its own loop; they share nothing during the run except counters that are merged every 100 ms.
+**`concurrency`** is the number of workers. Each one has its own socket or connection and its own loop. They share nothing while running, except counters that are merged every 100 ms.
 
-**`pipeline`** (UDP only) is how many queries each worker keeps in flight. A UDP worker fills its window in batches of up to 32 packets per system call, collects replies in batches, and tracks each query by a transaction ID that encodes its slot, so matching a reply to its query is constant time and a late or duplicate reply is ignored. This is what lets one worker push very high rates.
+**`pipeline`** only matters for UDP. It is how many queries each worker keeps in flight at once. A UDP worker fills its window in batches of up to 32 packets per system call and collects the replies in batches too. Each query carries a transaction ID that encodes its slot, so matching a reply to its query takes the same time however many are in flight, and a late or duplicate reply is simply ignored. This is how a single worker manages very high rates.
 
-The most queries in flight at once is `concurrency × pipeline`. TCP, DoT and DoH workers send one query and wait for its reply on a persistent connection, so for them `concurrency` alone sets the parallelism and `pipeline` has no effect.
+The most queries that can be in flight at once is `concurrency × pipeline`. TCP, DoT and DoH workers send one query and wait for its answer on a lasting connection, so for them `concurrency` alone sets how much happens in parallel and `pipeline` does nothing.
 
-Every query that is sent is counted. One that is never answered counts as an error, so a dead server shows up as errors rather than as an empty, successful-looking run.
-
-| Goal | Adjust |
+| If you want to | Change |
 |---|---|
-| Maximum UDP throughput | Raise `pipeline` first; add workers up to your core count |
-| Realistic TCP, DoT or DoH load | Raise `concurrency` only |
+| Get the most UDP throughput | Raise `pipeline` first, then add workers up to your core count |
+| Imitate real TCP, DoT or DoH traffic | Raise `concurrency` only |
 | Cap the rate | Set `rate_limit` |
-| Simulate N clients | `concurrency` N, `pipeline` 1 |
+| Imitate N separate clients | Set `concurrency` to N and `pipeline` to 1 |
 
 ---
 
-## Performance
+## How fast is it?
 
-On a single virtual CPU, sharing that core with a very fast loopback responder, one dnsbench worker sustained just over 200,000 queries per second with no errors, at about 2.6 microseconds of CPU per query. The previous Rust engine used about 5.2 to 5.9 microseconds per query on the same machine and peaked near 117,000 queries per second there. Absolute numbers depend entirely on your hardware, your network and, above all, the server under test; the CPU cost per query is the figure that carries over from one machine to another.
+On one virtual CPU, sharing that core with a very fast loopback responder, a single dnsbench worker sustained just over 200,000 queries per second with no errors, using about 2.6 microseconds of CPU per query. The older Rust engine needed about 5.2 to 5.9 microseconds per query on the same machine and topped out near 117,000 queries per second there.
 
-To measure your own, build the responder in `contrib/perf/reflect.c` and use `contrib/perf/drive.py` (both explain themselves in their headers).
+Your numbers will depend on your hardware, your network and, most of all, the server you're testing. The CPU cost per query is the figure that carries over from one machine to another.
+
+To measure your own, build the responder in `contrib/perf/reflect.c` and use `contrib/perf/drive.py`. Both explain how in their headers.
 
 ---
 
-## Service management
+## Looking after the service
 
 ```bash
 systemctl start|stop|restart|status dnsbench
 journalctl -u dnsbench -f
 ```
 
-The service runs as root because PAM must read the shadow file; the unit restricts it otherwise (`ProtectSystem=strict`, private `/tmp`, no new privileges). On disk it can write only to its state directory, `/var/lib/dnsbench`, its private `/tmp`, and `/opt/dnsbench`, which is where the Updates page installs a new version (`ReadWritePaths=-/opt/dnsbench` in the unit).
+The service runs as root because PAM has to read the shadow file, but the unit locks it down in other ways (`ProtectSystem=strict`, a private `/tmp`, no new privileges). On disk it can write only to its state directory `/var/lib/dnsbench`, its private `/tmp`, and `/opt/dnsbench`, which is where the Updates page installs new versions (`ReadWritePaths=-/opt/dnsbench` in the unit).
 
 ---
 
-## Updating from the web UI
+## Updating from the web page
 
-Sign in, open **Updates**, choose the `dnsbench_vN.tgz` (or `.zip`) archive of a newer release and press **Upload**. The archive is checked (it must be a dnsbench source tree with a plain-integer `VERSION` higher than the running one; links, absolute paths and `..` are refused) and staged under `STATE_DIR/update`. Then press **Update to vN**. The server:
+Sign in, open **Updates**, choose the `dnsbench_vN.tgz` (or `.zip`) of a newer release and press **Upload**. The archive is checked first. It has to be a dnsbench source tree whose `VERSION` is a plain integer higher than the running one, and links, absolute paths and `..` are refused. It is then staged under `STATE_DIR/update`. Now press **Update to vN**. The server will:
 
-1. builds the staged source on this host with the same settings as `install.sh` (a minute or two; the first build is slower while Go's cache fills),
-2. starts the new binary once on a spare loopback port, with a scratch state directory, and checks that its login page answers,
-3. keeps the running binary as `STATE_DIR/update/dnsbench.prev`, installs the new one in `/opt/dnsbench`, refreshes `README.md` and `LICENSE.txt` next to it, and restarts.
+1. Build the staged source on this machine with the same settings as `install.sh`. That takes a minute or two, and the first build is slower while Go's cache fills.
+2. Start the new binary once on a spare loopback port, with a scratch state directory, and check that its sign-in page answers.
+3. Keep the running binary as `STATE_DIR/update/dnsbench.prev`, install the new one in `/opt/dnsbench`, refresh `README.md` and `LICENSE.txt` next to it, and restart.
 
-If anything before the install fails, nothing has changed, and the page shows why. If the new version is installed but does not stay up (three starts without surviving 60 seconds), the previous binary is put back at the next start, and the page says so. The Updates page keeps a history of uploads, installs, failures and rollbacks with who did each.
+![The Updates page](snaps/updates.png)
 
-What to expect:
+If anything fails before the install, nothing has changed and the page tells you why. If the new version is installed but doesn't stay up (three starts without surviving 60 seconds), the old binary is put back at the next start and the page says so. The page also keeps a history of uploads, installs, failures and rollbacks, with who did each.
 
-- **The restart ends every session**, so you sign in again; the page does that for you once the server answers. A benchmark that is running is stopped, so the page asks first, and an update that has already been installed waits for a running benchmark to finish before it restarts.
-- **It needs what `install.sh` needs**: Go 1.22 or newer (or whatever the new release's `go.mod` asks for), a C compiler and the PAM headers. The installer leaves them in place. The page lists anything missing. The service has a plain `PATH`, so it looks for Go there and in the usual places: `/usr/local/go`, `/usr/bin`, `/usr/lib/go-*`, and a snap install (`/snap/go/current`, or `/var/lib/snapd/snap/go/current`). If it still cannot find one, the page says where it looked and names any Go it found that is too old.
-- **It only moves forward.** Going back to an older release is `install.sh --allow-downgrade`.
-- **Installs made before this feature need one `install.sh` run** from a release that has it. That installs the unit with `ReadWritePaths=-/opt/dnsbench`; until then the page says it cannot write there.
-- **Anyone who can sign in can make this host build and run code as root** by uploading it. If the sign-in group is wider than the people you would trust with that, set `ALLOW_UPDATES=false` in `/etc/dnsbench/dnsbench.conf` and restart. Every upload and update is written to the service log with the user's name and address.
+Things to expect:
+
+- **Everyone gets signed out by the restart.** The page signs you back in once the server answers. A running benchmark is stopped, so the page asks first, and an update that is already installed waits for a running benchmark to finish before restarting.
+- **It needs what `install.sh` needs.** That is Go 1.22 or newer (or whatever the new release's `go.mod` asks for), a C compiler and the PAM headers. The installer leaves them in place, and the page lists anything that's missing. The service has a plain `PATH`, so it looks for Go there and in the usual places: `/usr/local/go`, `/usr/bin`, `/usr/lib/go-*`, and a snap install (`/snap/go/current`, or `/var/lib/snapd/snap/go/current`). If it still can't find one, the page says where it looked and names any Go it found that was too old.
+- **It only goes forwards.** To go back to an older release, use `install.sh --allow-downgrade`.
+- **Installs made before this feature need one `install.sh` run** from a release that has it. That sets up the unit with `ReadWritePaths=-/opt/dnsbench`. Until then the page says it can't write there.
+- **Anyone who can sign in can make this machine build and run code as root** by uploading it. If your sign-in group is wider than the people you'd trust with that, set `ALLOW_UPDATES=false` in `/etc/dnsbench/dnsbench.conf` and restart. Every upload and update is written to the service log with the person's name and address.
 
 ---
 
 ## Upgrading from version 1
 
-Run `install.sh` over the old install. Your config and schedules are kept. **Sign-in now requires membership of the `dnsbench` group**, and the installer adds only the user who ran it, so add everyone else who used dnsbench before:
+Run `install.sh` over the old install. Your config and schedules are kept.
+
+**Signing in now needs membership of the `dnsbench` group.** The installer adds only the person who ran it, so add everyone else who used dnsbench before:
 
 ```bash
 sudo usermod -aG dnsbench alice
 ```
 
-The dark theme is also lighter than before, and light mode now shows when your system is set to light.
+The dark theme is also lighter than it used to be, and light mode now appears when your system is set to light.
 
 ---
 
 ## Upgrading from the Rust version
 
-Run `install.sh` over the old install. It detects the old version and:
+Run `install.sh` over the old install. It spots the old version and:
 
-- Replaces the old binary and the systemd unit
-- Moves an old-format config aside as `dnsbench.conf.pre-go`, writes a new one and keeps your listen address (the old default port 5353 clashes with mDNS and becomes 8453)
-- Copies your saved schedules to `/var/lib/dnsbench`
-- Keeps your existing PAM service file
-- Creates the `dnsbench` group and adds the user who ran the installer; everyone else who should sign in must be added (see Authentication)
+- Replaces the old binary and the systemd unit.
+- Moves an old-format config aside as `dnsbench.conf.pre-go`, writes a new one, and keeps your listen address. The old default port 5353 clashes with mDNS, so it becomes 8453.
+- Copies your saved schedules to `/var/lib/dnsbench`.
+- Keeps your existing PAM service file.
+- Creates the `dnsbench` group and adds the person who ran the installer. Everyone else who should sign in has to be added (see Who can sign in).
 
-What changed for users: the Technitium DNS Server integration is gone, as are the local-user login and the `.pfx` certificate (use PEM files, or let dnsbench generate one), and DoQ was removed because it never worked. Logins now always use PAM.
+Some things are gone. The Technitium DNS Server integration is removed, and so are the local-user login and the `.pfx` certificate (use PEM files, or let dnsbench make one). DoQ was removed too, because it never worked. Logins now always go through PAM.
 
 ---
 
-## Uninstall
+## Uninstalling
 
 ```bash
-sudo bash uninstall.sh            # keeps config, certificate and schedules
+sudo bash uninstall.sh            # keeps your config, certificate and schedules
 sudo bash uninstall.sh --purge    # removes those too
 ```
 
-The PAM service file is removed only if it is still exactly the one the installer wrote. The `dnsbench` group is removed only with `--purge`, and only if the installer created it; a group that already existed is left alone.
+The PAM service file is removed only if it is still exactly what the installer wrote. The `dnsbench` group is removed only with `--purge`, and only if the installer was the one that created it. A group that was already there is left alone.
 
 ---
 
@@ -342,11 +392,11 @@ go vet ./... && go test -race -count=1 ./...
 go build -trimpath -buildvcs=false -o dnsbench .
 ```
 
-You need Go 1.22 or newer, a C compiler and the PAM headers (`libpam0g-dev` or `pam-devel`). Built without cgo, dnsbench still compiles but refuses every login.
+You need Go 1.22 or newer, a C compiler and the PAM headers (`libpam0g-dev` or `pam-devel`). If you build without cgo, dnsbench still compiles but refuses every login.
 
 ---
 
-## How it works
+## How the pieces fit together
 
 ```
 Browser / curl ──HTTPS──▶ dnsbench (:8453)
@@ -367,4 +417,4 @@ Browser / curl ──HTTPS──▶ dnsbench (:8453)
 
 ## License
 
-GNU General Public License v3, see `LICENSE.txt`.
+GNU General Public License v3. See `LICENSE.txt`.

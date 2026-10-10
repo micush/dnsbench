@@ -203,6 +203,21 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     await page.waitForTimeout(500);
     check('results: the highlight is gone after leaving and coming back', (await page.locator('#historyList .run-card.hl').count()) === 0);
 
+    // The calendar icon on a result card opens the schedule editor pre-filled from that run
+    await page.click('#historyList .run-card:first-child button[title="Schedule this job"]');
+    await page.waitForSelector('#schedModal[open]');
+    const fromRun = await page.evaluate(() => ({
+      title: document.getElementById('schedModalTitle').textContent,
+      id: document.getElementById('schedId').value,
+      server: document.getElementById('schedServer').value,
+      proto: document.getElementById('schedProtocol').value,
+      stillOnResults: document.getElementById('page-history').classList.contains('active'),
+    }));
+    check('results: the calendar icon opens the schedule editor pre-filled from the run',
+      fromRun.title === 'Schedule This Job' && fromRun.id === '' && fromRun.server.includes('127.0.0.1') && fromRun.proto === 'udp' && fromRun.stillOnResults, JSON.stringify(fromRun));
+    await page.click('#schedModal .btn-close');
+    await page.waitForSelector('#schedModal[open]', { state: 'detached' });
+
     // Add a schedule through the real modal
     await page.evaluate(() => showPage('schedules', document.querySelector('.nav-link[onclick*="schedules"]')));
     await page.click('button:has-text("Add Schedule")');

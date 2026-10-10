@@ -55,6 +55,8 @@ ICONS = {
     "box-arrow-right": stroke("M9 2.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1H9", "M6.5 8h7.2", "M11.1 5.3L13.8 8l-2.7 2.7"),
     "calendar-check": stroke("M3.5 3h9A1.5 1.5 0 0 1 14 4.5v8a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-8A1.5 1.5 0 0 1 3.5 3z",
                               "M2 6.5h12", "M5 1.5v3M11 1.5v3", "M5.9 10.3l1.6 1.6 3-3.2"),
+    "calendar-plus": stroke("M3.5 3h9A1.5 1.5 0 0 1 14 4.5v8a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-8A1.5 1.5 0 0 1 3.5 3z",
+                             "M2 6.5h12", "M5 1.5v3M11 1.5v3", "M8 8.4v4M6 10.4h4"),
     "check-circle-fill": cutout(CIRCLE, CHECK),
     "check2": stroke("M3 8.5l3.3 3.3L13 4.8"),
     "circle-half": stroke("M8 1.8a6.2 6.2 0 1 0 0 12.4a6.2 6.2 0 0 0 0-12.4z") + fill("M8 1.8a6.2 6.2 0 0 0 0 12.4z"),

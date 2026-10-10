@@ -945,10 +945,11 @@ document.getElementById('schedModal').addEventListener('click', e => { if (e.tar
 // openSchedModal()              add a new schedule
 // openSchedModal(s)             edit s
 // openSchedModal(s, true)       a new schedule pre-filled from s (no id, so Save adds rather than updates)
+// openSchedModal(s, 'run')      a new schedule pre-filled from a finished run (name kept as given)
 function openSchedModal(s, copy) {
-  document.getElementById('schedModalTitle').textContent = s ? (copy ? 'Duplicate Schedule' : 'Edit Schedule') : 'Add Schedule';
+  document.getElementById('schedModalTitle').textContent = s ? (copy === 'run' ? 'Schedule This Job' : copy ? 'Duplicate Schedule' : 'Edit Schedule') : 'Add Schedule';
   document.getElementById('schedId').value        = (s && !copy) ? s.id : '';
-  document.getElementById('schedName').value      = s ? (copy ? (s.name || s.server) + ' (copy)' : (s.name || '')) : '';
+  document.getElementById('schedName').value      = s ? (copy === 'run' ? (s.name || '') : copy ? (s.name || s.server) + ' (copy)' : (s.name || '')) : '';
   document.getElementById('schedServer').value    = s ? s.server : '';
   document.getElementById('schedProtocol').value  = s ? s.protocol : 'udp';
   document.getElementById('schedConcurrency').value = s ? s.concurrency : '';
@@ -1554,6 +1555,26 @@ function redoJob(idx){
   document.getElementById('btnRun').focus();
 }
 
+// Open the schedule editor pre-filled from a finished run's settings. Nothing is saved until Save is clicked.
+function scheduleFromRun(idx){
+  const r=runHistory[idx];
+  if(!r||!r.args) return;
+  const a=r.args;
+  const proto=(a.protocol||'udp').toLowerCase();
+  openSchedModal({
+    name:'',
+    server:a.server||'',
+    protocol:proto,
+    concurrency:a.concurrency!=null?String(a.concurrency):'',
+    pipeline:a.pipeline!=null?String(a.pipeline):'',
+    duration:a.duration||'30s',
+    qtype:a.query_type||'ANY',
+    recurse:a.recurse!=='false',
+    queries:a.queries||'',
+    freq:'daily', weekday:1, monthday:1, hour:2, minute:0
+  }, 'run');
+}
+
 function setStatus(t,c){
   const el=document.getElementById('jobStatus');
   el.textContent=t; el.className=`badge bg-${c}`;
@@ -1835,6 +1856,7 @@ function renderHistory(){
             </div>
             <div style="font-size:0.936rem;color:var(--muted)">${killed||running?'No stats':'No stats available'}</div>
           </div>
+          ${(!running&&r.args)?'<button onclick="event.stopPropagation();scheduleFromRun('+idx+')" title="Schedule this job" aria-label="Schedule this job" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1;flex-shrink:0"><i class="bi bi-calendar-plus" style="font-size:0.975rem"></i></button>':''}
           <button class="run-out-btn" data-idx="${idx}" onclick="event.stopPropagation();toggleOutput(${idx})" title="Toggle output" style="display:none;background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1"><i class="bi bi-terminal" style="font-size:0.975rem"></i></button>
           ${(!running&&r.args)?'<button onclick="event.stopPropagation();redoJob('+idx+')" title="Re-run this job" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1;flex-shrink:0"><i class="bi bi-arrow-clockwise" style="font-size:0.975rem"></i></button>':''}
           <span style="font-size:0.936rem;color:var(--muted);flex-shrink:0">${esc(timeOnly)}</span>
@@ -1855,6 +1877,7 @@ function renderHistory(){
               ${hlBadge}
         </div>
         <div style="display:flex;align-items:center;gap:10px">
+          ${r.args?'<button onclick="event.stopPropagation();scheduleFromRun('+idx+')" title="Schedule this job" aria-label="Schedule this job" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1;flex-shrink:0"><i class="bi bi-calendar-plus" style="font-size:0.975rem"></i></button>':''}
           <button class="run-out-btn" data-idx="${idx}" onclick="event.stopPropagation();toggleOutput(${idx})" title="Toggle output" style="display:none;background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1"><i class="bi bi-terminal" style="font-size:0.975rem"></i></button>
           ${r.args?'<button onclick="event.stopPropagation();redoJob('+idx+')" title="Re-run this job" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1;flex-shrink:0"><i class="bi bi-arrow-clockwise" style="font-size:0.975rem"></i></button>':''}
           <span style="font-size:0.936rem;color:var(--muted)">${esc(timeOnly)}</span>
