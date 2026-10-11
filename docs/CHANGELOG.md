@@ -1,5 +1,16 @@
 # Changelog
 
+## [v14] - 2026-10-10 — A one-line installer, get.sh
+
+### Added
+- **`get.sh`** at the top of the project, for installing straight from GitHub the same way as Anyname: `curl -fsSL https://raw.githubusercontent.com/micush/dnsbench/HEAD/get.sh | sudo bash`. It finds the newest release (else the highest `v<number>` tag), downloads that tag's source archive, checks it is a dnsbench tree (`source/go.mod` is `module dnsbench`, `source/VERSION` a plain integer, `install.sh` present) and runs its `install.sh`. Arguments after `--` go to `install.sh`; `--version TAG` picks a tag. Everything runs inside one function that starts only once the whole script has arrived, so a dropped connection runs nothing. The README's Installing section documents it.
+
+### Verified
+- `bash -n get.sh`, and a run against a local fake GitHub with a stub `install.sh`: latest lookup from the release endpoint, GitHub-style single-directory tarball, argument pass-through.
+
+### Not verified
+- Against the real GitHub or with the real `install.sh` (the sandbox cannot reach GitHub, and installing would change this machine).
+
 ## [v13] - 2026-10-10 — Fetch from online skips tags that are not dnsbench
 
 ### Fixed

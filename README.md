@@ -33,6 +33,13 @@ You need a Linux machine with systemd. From the unpacked project folder, run:
 sudo bash install.sh
 ```
 
+Or install straight from GitHub with one line. It downloads the newest release of `micush/dnsbench` (the newest published release, otherwise the highest `v<number>` tag), unpacks it and runs its `install.sh`. Run it again to upgrade. Options for `install.sh` go after `--`, and `--version vN` picks a tag:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/micush/dnsbench/HEAD/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/micush/dnsbench/HEAD/get.sh | sudo bash -s -- --version v13
+```
+
 The installer does five things:
 
 1. Installs what it needs to build the program: a C compiler and the PAM development headers (it knows apt, dnf/yum and pacman). If your system has no Go 1.22 or newer, it also fetches the official Go toolchain, checks its checksum and uses it for this build only.
