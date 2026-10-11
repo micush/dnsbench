@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -74,49 +75,66 @@ func numericTagLess(a, b string) bool {
 	return false
 }
 
-// latestTag is the newest published release, or else the highest v<number> tag of the repository.
-func latestTag(ctx context.Context) (string, error) {
+// candidateTags lists the tags to try, best first: the newest published release, then the repository's v<number> tags from
+// the highest down (at most 10). More than one is returned because a repository's tags can include ones that are not
+// dnsbench releases; the caller skips those.
+func candidateTags(ctx context.Context) ([]string, error) {
+	var out []string
 	if b, err := ghGet(ctx, ghAPI+"/repos/"+ghRepo+"/releases/latest", 1<<20); err == nil {
 		var r struct {
 			Tag string `json:"tag_name"`
 		}
 		if json.Unmarshal(b, &r) == nil && r.Tag != "" && ghTagRe.MatchString(r.Tag) {
-			return r.Tag, nil
+			out = append(out, r.Tag)
 		}
 	}
 	b, err := ghGet(ctx, ghAPI+"/repos/"+ghRepo+"/tags?per_page=100", 4<<20)
 	if err != nil {
-		return "", fmt.Errorf("cannot reach GitHub: %w", err)
+		if len(out) > 0 {
+			return out, nil
+		}
+		return nil, fmt.Errorf("cannot reach GitHub: %w", err)
 	}
 	var tags []struct {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(b, &tags); err != nil {
-		return "", errors.New("GitHub's answer was not understood")
+		if len(out) > 0 {
+			return out, nil
+		}
+		return nil, errors.New("GitHub's answer was not understood")
 	}
-	best := ""
+	var nums []string
 	for _, t := range tags {
-		if ghNumTagRe.MatchString(t.Name) && (best == "" || numericTagLess(best, t.Name)) {
-			best = t.Name
+		if ghNumTagRe.MatchString(t.Name) && (len(out) == 0 || t.Name != out[0]) {
+			nums = append(nums, t.Name)
 		}
 	}
-	if best == "" {
-		return "", errors.New("no release or v<number> tag found in " + ghRepo + " (rate limit or no tags yet)")
+	sort.Slice(nums, func(i, j int) bool { return numericTagLess(nums[j], nums[i]) })
+	out = append(out, nums...)
+	if len(out) > 10 {
+		out = out[:10]
 	}
-	return best, nil
+	if len(out) == 0 {
+		return nil, errors.New("no release or v<number> tag found in " + ghRepo + " (rate limit or no tags yet)")
+	}
+	return out, nil
 }
 
-// fetchRelease downloads the source archive of the newest tag.
-func fetchRelease(ctx context.Context) (body []byte, tag string, err error) {
-	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
-	defer cancel()
-	tag, err = latestTag(ctx)
+// latestTag is the first candidate.
+func latestTag(ctx context.Context) (string, error) {
+	c, err := candidateTags(ctx)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
-	body, err = ghGet(ctx, ghHost+"/"+ghRepo+"/archive/refs/tags/"+tag+".tar.gz", maxUploadBytes)
+	return c[0], nil
+}
+
+// fetchTag downloads the source archive of one tag.
+func fetchTag(ctx context.Context, tag string) ([]byte, error) {
+	body, err := ghGet(ctx, ghHost+"/"+ghRepo+"/archive/refs/tags/"+tag+".tar.gz", maxUploadBytes)
 	if err != nil {
-		return nil, tag, fmt.Errorf("download of %s failed: %w", tag, err)
+		return nil, fmt.Errorf("download of %s failed: %w", tag, err)
 	}
-	return body, tag, nil
+	return body, nil
 }

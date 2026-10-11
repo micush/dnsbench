@@ -137,3 +137,19 @@ func TestFetchFailuresAreReportedAndStageNothing(t *testing.T) {
 		t.Error("a failed fetch staged something")
 	}
 }
+
+func TestFetchSkipsTagsThatAreNotDnsbench(t *testing.T) {
+	us := newUpdateServer(t)
+	ver := nextVersion(t)
+	other := tgzOf(t, []tent{{name: "x/source/go.mod", body: "module ddgw\n"}, {name: "x/source/main.go", body: "x"}, {name: "x/source/VERSION", body: "304\n"}})
+	fakeGitHub(t, "", []string{"v304", "v" + ver}, map[string][]byte{"v304": other, "v" + ver: githubTgz(t, ver)})
+	resp, body := us.do(t, "POST", "/api/update/fetch", "", us.hdr)
+	if resp.StatusCode != 200 || !strings.Contains(body, `"tag":"v`+ver+`"`) {
+		t.Fatalf("fetch: %d %s", resp.StatusCode, body)
+	}
+	fakeGitHub(t, "", []string{"v304"}, map[string][]byte{"v304": other})
+	us2 := newUpdateServer(t)
+	if resp, body := us2.do(t, "POST", "/api/update/fetch", "", us2.hdr); resp.StatusCode != 422 || !strings.Contains(body, "none of the tags") {
+		t.Errorf("only foreign tags: %d %s", resp.StatusCode, body)
+	}
+}

@@ -1,5 +1,16 @@
 # Changelog
 
+## [v13] - 2026-10-10 — Fetch from online skips tags that are not dnsbench
+
+### Fixed
+- **"v304 was rejected: not a dnsbench source tree" from Fetch from online.** The repository carries tags that are not dnsbench releases (v304 is another project's), and the highest tag was taken blindly. It now tries the newest release, then the `v<number>` tags from the highest down (at most 10), and skips any whose archive is not a dnsbench source tree. If none is, it says which tags it tried. Any other rejection (for example not newer than the running version) still stops at once and is reported.
+
+### Verified
+- New test with a fake GitHub: a foreign `v304` tag is skipped and the real newest tag is staged; only foreign tags gives a 422 naming them. The earlier fetch tests pass.
+
+### Not verified
+- Against the real GitHub (the sandbox cannot reach it); the full race suite and Chromium run were from v12, with only `fetchrelease.go`/`update_web.go` changed since.
+
 ## [v12] - 2026-10-10 — Fetch the newest release from GitHub on the Updates page
 
 ### Added

@@ -58,13 +58,32 @@ func (a *App) UpdateFetch(ctx context.Context, by string) (ver, tag string, err 
 	if !a.updater.enabled {
 		return "", "", errUpdatesOff
 	}
-	body, tag, err := fetchRelease(ctx)
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	cands, err := candidateTags(ctx)
 	if err != nil {
-		return "", tag, err
+		return "", "", err
 	}
-	ver, err = a.updater.Stage(body, version())
-	if err != nil {
-		return "", tag, fmt.Errorf("%s was rejected: %w", tag, err)
+	var skipped []string
+	for _, t := range cands {
+		body, err := fetchTag(ctx, t)
+		if err != nil {
+			return "", t, err
+		}
+		v, err := a.updater.Stage(body, version())
+		if err != nil {
+			// a tag of something else (the repository may carry other projects' tags): try the next one down
+			if strings.Contains(err.Error(), "not a dnsbench source tree") {
+				skipped = append(skipped, t)
+				continue
+			}
+			return "", t, fmt.Errorf("%s was rejected: %w", t, err)
+		}
+		ver, tag = v, t
+		break
+	}
+	if ver == "" {
+		return "", "", fmt.Errorf("none of the tags tried (%s) is a dnsbench source tree", strings.Join(skipped, ", "))
 	}
 	a.updater.Record(UpdateEvent{Kind: "uploaded", To: ver, By: by,
 		Detail: fmt.Sprintf("source v%s (%s) fetched from GitHub and staged (running v%s)", ver, tag, version())})
