@@ -464,8 +464,12 @@
         <button id="updUploadBtn" class="run-btn" style="width:auto;padding:8px 18px;font-size:1.014rem" onclick="updUpload()">Upload</button>
       </header>
       <div class="body">
-        <p class="hint" style="margin:0 0 8px">Choose the <code>dnsbench_vN.tgz</code> (or .zip) archive of a newer release. It is checked and staged on this server; nothing is installed yet.</p>
-        <input id="updFile" type="file" accept=".tgz,.tar.gz,.zip,application/gzip,application/zip" aria-label="Release archive" style="color:var(--text)">
+        <p class="hint" style="margin:0 0 8px">Choose the <code>dnsbench_vN.tgz</code> (or .zip) archive of a newer release. It is checked and staged on this server; nothing is installed yet. Or tick <em>Fetch from online</em> to get the newest release from GitHub instead.</p>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 28px">
+          <input id="updFile" type="file" accept=".tgz,.tar.gz,.zip,application/gzip,application/zip" aria-label="Release archive" style="color:var(--text)">
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--text);cursor:pointer"><input id="updOnline" type="checkbox" onchange="updOnlineToggle()"> Fetch from online</label>
+          <span id="updOnlineMsg" aria-live="polite" style="font-size:.95rem;color:var(--muted)"></span>
+        </div>
       </div>
     </div>
 
@@ -2129,7 +2133,33 @@ function renderUpdates(v){
 
 function when(iso){ try{ return new Date(iso).toLocaleString(); }catch(e){ return iso||''; } }
 
+function updOnlineSay(kind,text){
+  const el=document.getElementById('updOnlineMsg');
+  el.textContent=text||'';
+  el.style.color=kind==='bad'?'var(--danger)':'var(--muted)';
+}
+function updOnlineToggle(){
+  document.getElementById('updFile').disabled=document.getElementById('updOnline').checked;
+  updOnlineSay('','');
+}
+
+async function updFetchOnline(){
+  const btn=document.getElementById('updUploadBtn'); btn.disabled=true;
+  updSay('','');
+  updOnlineSay('','Fetching the newest release from GitHub…');
+  try{
+    const r=await fetch('/api/update/fetch',{method:'POST'});
+    if(r.status===401){ updServerGone('Your session ended: you need to sign in again.'); return; }
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok) updOnlineSay('bad',d.error||('Fetch failed ('+r.status+').'));
+    else{ updOnlineSay('','Release v'+d.data.version+' ('+d.data.tag+') is staged. Install it with the button below.'); }
+  }catch(e){ updOnlineSay('bad','Fetch failed: '+e.message); }
+  finally{ btn.disabled=false; loadUpdates(); }
+}
+
 async function updUpload(){
+  if(document.getElementById('updOnline').checked){ return updFetchOnline(); }
+  updOnlineSay('','');
   const file=document.getElementById('updFile').files[0];
   if(!file){ updSay('warn','Choose a release archive first.'); return; }
   const btn=document.getElementById('updUploadBtn'); btn.disabled=true;

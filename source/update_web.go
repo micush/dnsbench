@@ -53,6 +53,25 @@ func (a *App) UpdateUpload(body []byte, by string) (string, error) {
 	return ver, nil
 }
 
+// UpdateFetch downloads the newest release from GitHub and stages it exactly as an upload would be.
+func (a *App) UpdateFetch(ctx context.Context, by string) (ver, tag string, err error) {
+	if !a.updater.enabled {
+		return "", "", errUpdatesOff
+	}
+	body, tag, err := fetchRelease(ctx)
+	if err != nil {
+		return "", tag, err
+	}
+	ver, err = a.updater.Stage(body, version())
+	if err != nil {
+		return "", tag, fmt.Errorf("%s was rejected: %w", tag, err)
+	}
+	a.updater.Record(UpdateEvent{Kind: "uploaded", To: ver, By: by,
+		Detail: fmt.Sprintf("source v%s (%s) fetched from GitHub and staged (running v%s)", ver, tag, version())})
+	log.Printf("update: source v%s (%s) fetched from GitHub and staged by %q", ver, tag, by)
+	return ver, tag, nil
+}
+
 // UpdateApply starts building the staged source and restarts into it. The build takes minutes,
 // so it runs in the background; progress shows in the status (busy, phase, history). The
 // preconditions that can be checked up front are, so the person gets an answer now.
@@ -204,6 +223,20 @@ func (a *App) apiUpdateUpload(w http.ResponseWriter, r *http.Request, s *session
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"version": ver}})
+}
+
+func (a *App) apiUpdateFetch(w http.ResponseWriter, r *http.Request, s *session) {
+	if !a.updater.enabled {
+		jerr(w, http.StatusForbidden, errUpdatesOff.Error())
+		return
+	}
+	log.Printf("update: %q asked for the newest release from GitHub (from %s)", s.user, clientIP(r))
+	ver, tag, err := a.UpdateFetch(r.Context(), s.user)
+	if err != nil {
+		jerr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"version": ver, "tag": tag}})
 }
 
 func (a *App) apiUpdateApply(w http.ResponseWriter, r *http.Request, s *session) {

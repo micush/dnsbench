@@ -184,6 +184,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/schedules/run", a.auth(a.apiSchedulesRun))
 	mux.HandleFunc("GET /api/update", a.auth(a.apiUpdateStatus))
 	mux.HandleFunc("POST /api/update/upload", a.auth(a.apiUpdateUpload))
+	mux.HandleFunc("POST /api/update/fetch", a.auth(a.apiUpdateFetch))
 	mux.HandleFunc("POST /api/update/apply", a.auth(a.apiUpdateApply))
 	mux.HandleFunc("GET /api/readme-html", a.auth(a.apiDoc("README.md")))
 	mux.HandleFunc("GET /api/license-html", a.auth(a.apiDoc("LICENSE.txt")))

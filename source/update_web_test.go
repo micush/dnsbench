@@ -169,6 +169,10 @@ func TestCrossOriginUploadAndApplyAreRefused(t *testing.T) {
 	if resp.StatusCode != 403 {
 		t.Errorf("foreign Origin upload: %d", resp.StatusCode)
 	}
+	resp, _ = us.do(t, "POST", "/api/update/fetch", "", map[string]string{"X-Session-Token": us.hdr["X-Session-Token"], "Sec-Fetch-Site": "cross-site"})
+	if resp.StatusCode != 403 {
+		t.Errorf("cross-site fetch: %d", resp.StatusCode)
+	}
 	us.upload(t, releaseTgz(t, nextVersion(t)), nil)
 	h := map[string]string{"Content-Type": "application/json", "Sec-Fetch-Site": "same-site"}
 	for k, v := range us.hdr {
@@ -186,7 +190,7 @@ func TestCrossOriginUploadAndApplyAreRefused(t *testing.T) {
 func TestUpdatesSwitchedOffRefusesEverythingButStatus(t *testing.T) {
 	us := newUpdateServer(t)
 	us.app.updater.enabled = false
-	for _, p := range []string{"/api/update/upload", "/api/update/apply"} {
+	for _, p := range []string{"/api/update/upload", "/api/update/fetch", "/api/update/apply"} {
 		resp, body := us.do(t, "POST", p, "{}", map[string]string{"X-Session-Token": us.hdr["X-Session-Token"], "Content-Type": "application/json"})
 		if resp.StatusCode != 403 || !strings.Contains(body, "ALLOW_UPDATES=false") {
 			t.Errorf("%s: %d %s", p, resp.StatusCode, body)
