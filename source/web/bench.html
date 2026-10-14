@@ -1921,13 +1921,14 @@ function renderHistory(){
         <div style="margin-left:auto;text-align:right">
           <div style="font-size:0.936rem;color:var(--muted)">${esc(workers)} workers · ${queueStr}${esc(reps)}</div>
           ${hasErrors
-            ?'<div style="font-size:0.936rem;margin-top:2px"><span style="color:var(--term-err)">'+s.errors.toLocaleString()+' errors</span> <span style="color:'+errRateColor+';font-weight:600">('+errRateStr+')</span></div>'
+            ?'<div style="font-size:0.936rem;margin-top:2px"><button type="button" onclick="event.stopPropagation();toggleErrors('+idx+',this)" title="Show the errors" aria-expanded="false" style="background:none;border:none;padding:0;font:inherit;color:var(--term-err);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">'+s.errors.toLocaleString()+' errors</button> <span style="color:'+errRateColor+';font-weight:600">('+errRateStr+')</span></div>'
             :'<div style="font-size:0.936rem;color:var(--term-ok);margin-top:2px">0 errors <span style="font-weight:600">(0.00%)</span></div>'}
         </div>
       </div>
       <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
         <input type="text" placeholder="Add a note…" value="${(r.note||'').replace(/"/g,'&quot;')}" onclick="event.stopPropagation()" onchange="saveNote(${idx},this.value)" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--muted);padding:4px 8px;font-size:0.936rem;outline:none;transition:.12s" onfocus="this.style.borderColor='var(--accent)';this.style.color='var(--text)'" onblur="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
       </div>
+      <div class="run-err-area" style="display:none;margin-top:8px"></div>
       <div class="run-out-area" data-idx="${idx}"></div>
     </div>`;
   }).join('');
@@ -1960,6 +1961,30 @@ function toggleOutput(idx){
   if(btn) btn.innerHTML=visible
     ?'<i class="bi bi-terminal" style="font-size:0.975rem"></i>'
     :'<i class="bi bi-terminal-fill" style="font-size:0.975rem"></i>';
+}
+
+// The RCODE breakdown and "Sample errors" lines of a run's saved output.
+function errorDetailLines(output){
+  const out=[]; let inSamples=false;
+  (output||[]).forEach(t=>{
+    const p=String(t).replace(/§[a-z]+§/g,'');
+    if(/^\s*RCODE\s/.test(p)){ out.push(t); inSamples=false; }
+    else if(/^\s*Sample errors/.test(p)){ out.push(t); inSamples=true; }
+    else if(inSamples){ if(!p.trim()||p.includes('────')) inSamples=false; else out.push(t); }
+  });
+  return out;
+}
+
+function toggleErrors(idx,btn){
+  const area=btn.closest('.run-card').querySelector('.run-err-area');
+  const open=area.style.display==='none';
+  if(open && !area.childElementCount){
+    const lines=errorDetailLines((runHistory[idx]||{}).output);
+    if(lines.length) area.appendChild(buildOutputEl(lines));
+    else{ const m=document.createElement('div'); m.className='hint'; m.style.margin='0'; m.textContent='No error details were saved for this run.'; area.appendChild(m); }
+  }
+  area.style.display=open?'block':'none';
+  btn.setAttribute('aria-expanded',open?'true':'false');
 }
 
 function buildOutputEl(lines){
@@ -2171,7 +2196,7 @@ async function updFetchOnline(){
     if(r.status===401){ updServerGone('Your session ended: you need to sign in again.'); return; }
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.ok) updOnlineSay(updNotNewer(d.error)?'':'bad',updNotNewer(d.error)?'':(d.error||('Fetch failed ('+r.status+').')));
-    else{ updOnlineSay('','Release v'+d.data.version+' ('+d.data.tag+') is staged. Install it with the button below.'); }
+    else{ updOnlineSay('','Release v'+d.data.version+' is staged. Install it with the button below.'); }
   }catch(e){ updOnlineSay('bad','Fetch failed: '+e.message); }
   finally{ btn.disabled=false; loadUpdates(); }
 }

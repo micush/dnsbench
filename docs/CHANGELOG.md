@@ -1,5 +1,27 @@
 # Changelog
 
+## [v21] - 2026-10-14 — No doubled version in the fetch message
+
+### Changed
+- Updates ▸ Fetch from online: the confirmation now reads "Release v19 is staged. Install it with the button below." instead of repeating the version as "Release v19 (v19) is staged." Wording only.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball; cross-compile of all listed architectures.
+
+### Not verified
+- Not viewed in a browser (`contrib/uitest/ui.js` not run). Only the native amd64 cgo build is verified with PAM.
+
+## [v20] - 2026-10-14 — Click a run's error count to see the errors
+
+### Added
+- In the Benchmark history cards, the red "N errors" text is now a button. Clicking it opens a panel under the card with the run's RCODE breakdown and its sample errors (up to 5 domain: reason lines), taken from the output saved with the run; clicking again closes it. A run with no saved output shows "No error details were saved for this run." Front-end only.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball; cross-compile of all listed architectures.
+
+### Not verified
+- Not clicked in a browser (`contrib/uitest/ui.js` not run). Only the native amd64 cgo build is verified with PAM.
+
 ## [v19] - 2026-10-14 — Add popular domains in the schedule editor
 
 ### Added
