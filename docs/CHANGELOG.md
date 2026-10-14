@@ -1,5 +1,16 @@
 # Changelog
 
+## [v18] - 2026-10-14 — No duplicate "not newer" error on the Updates page
+
+### Changed
+- Updates ▸ 1. Upload a release: when an uploaded or fetched archive is rejected because it is not newer than the running version, the red error line is no longer shown, since "2. Install it" already says "The staged release is not newer than the running one." Every other upload/fetch error is still shown. Front-end only; the server's response is unchanged.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball; cross-compile of all listed architectures.
+
+### Not verified
+- Not exercised in a browser (`contrib/uitest/ui.js` not run); the UI test (`contrib/uitest/ui.js`) was edited to expect no red line for this case but not run. Only the native amd64 cgo build is verified with PAM.
+
 ## [v17] - 2026-10-14 — Shorter Updates page text
 
 ### Changed

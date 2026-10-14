@@ -2145,6 +2145,9 @@ function renderUpdates(v){
 
 function when(iso){ try{ return new Date(iso).toLocaleString(); }catch(e){ return iso||''; } }
 
+// A release that is not newer is already explained under "2. Install it"; don't repeat it in red.
+function updNotNewer(err){ return /not newer than the running/.test(err||''); }
+
 function updOnlineSay(kind,text){
   const el=document.getElementById('updOnlineMsg');
   el.textContent=text||'';
@@ -2163,7 +2166,7 @@ async function updFetchOnline(){
     const r=await fetch('/api/update/fetch',{method:'POST'});
     if(r.status===401){ updServerGone('Your session ended: you need to sign in again.'); return; }
     const d=await r.json().catch(()=>({}));
-    if(!r.ok||!d.ok) updOnlineSay('bad',d.error||('Fetch failed ('+r.status+').'));
+    if(!r.ok||!d.ok) updOnlineSay(updNotNewer(d.error)?'':'bad',updNotNewer(d.error)?'':(d.error||('Fetch failed ('+r.status+').')));
     else{ updOnlineSay('','Release v'+d.data.version+' ('+d.data.tag+') is staged. Install it with the button below.'); }
   }catch(e){ updOnlineSay('bad','Fetch failed: '+e.message); }
   finally{ btn.disabled=false; loadUpdates(); }
@@ -2180,7 +2183,7 @@ async function updUpload(){
     const r=await fetch('/api/update/upload',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});
     if(r.status===401){ updServerGone('Your session ended: you need to sign in again.'); return; }
     const d=await r.json().catch(()=>({}));
-    if(!r.ok||!d.ok) updSay('bad',d.error||('Upload failed ('+r.status+').'));
+    if(!r.ok||!d.ok) updSay('bad',updNotNewer(d.error)?'':(d.error||('Upload failed ('+r.status+').')));
     else{ document.getElementById('updFile').value=''; updSay('ok','Release v'+d.data.version+' is staged. Install it with the button below.'); }
   }catch(e){ updSay('bad','Upload failed: '+e.message); }
   finally{ btn.disabled=false; loadUpdates(); }

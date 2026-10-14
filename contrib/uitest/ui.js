@@ -573,8 +573,11 @@ const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name
     };
     await page.setInputFiles('#updFile', mkRelease(running));
     await page.click('#updUploadBtn');
-    await page.waitForFunction(() => document.getElementById('updMsg').textContent.includes('not newer'), null, { timeout: 10000 });
-    check('updates: a release that is not newer is refused', true);
+    // the refusal is explained under "2. Install it", not repeated as a red line
+    await page.waitForFunction(() => !document.getElementById('updUploadBtn').disabled, null, { timeout: 10000 });
+    await page.waitForFunction(() => /not newer|newer release first/.test(document.getElementById('updApplyHint').textContent), null, { timeout: 10000 });
+    check('updates: a release that is not newer is refused without a red line', (await page.textContent('#updMsg')).trim() === '', await page.textContent('#updMsg'));
+    check('updates: Update now stays disabled for it', await page.isDisabled('#updApplyBtn'));
     // a newer one is staged
     const newer = String(Number(running) + 1);
     await page.setInputFiles('#updFile', mkRelease(newer));
