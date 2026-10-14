@@ -1,5 +1,16 @@
 # Changelog
 
+## [v19] - 2026-10-14 — Add popular domains in the schedule editor
+
+### Added
+- The same "add popular domains" icon (v15) now sits at the right of the **Queries** label in the Add/Edit Schedule dialog. It appends the 569 popular domains to the schedule's query list, skipping ones already there. Unlike the Benchmark tab's list, it does not touch the saved localStorage list; it only fills the dialog's box, and the schedule stores it on **Save Schedule**.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball; cross-compile of all listed architectures.
+
+### Not verified
+- Not clicked in a browser (`contrib/uitest/ui.js` not run). Only the native amd64 cgo build is verified with PAM.
+
 ## [v18] - 2026-10-14 — No duplicate "not newer" error on the Updates page
 
 ### Changed
