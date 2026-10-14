@@ -13,6 +13,7 @@ systemd unit, the example config, the PAM service, and the `perf/` and `uitest/`
 directory is part of the archive exactly as received; never modify it. All Go commands below run in
 `source/`. The installer expects `source/go.mod`, `source/VERSION`, `contrib/dnsbench.service`,
 `contrib/dnsbench.conf` and `contrib/pam.d/dnsbench`.
+`source/domains.txt` is the built-in preset domain list (embedded by `domains.go`); the installer also copies it to `/etc/dnsbench/domains.txt` when that file is absent and never overwrites it.
 
 ## Release process — do this for every request that changes the project
 

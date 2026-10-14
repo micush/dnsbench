@@ -182,6 +182,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/schedules/pause", a.auth(a.apiSchedulesPause))
 	mux.HandleFunc("POST /api/schedules/resume", a.auth(a.apiSchedulesResume))
 	mux.HandleFunc("POST /api/schedules/run", a.auth(a.apiSchedulesRun))
+	mux.HandleFunc("GET /api/preset-domains", a.auth(a.apiPresetDomains))
 	mux.HandleFunc("GET /api/update", a.auth(a.apiUpdateStatus))
 	mux.HandleFunc("POST /api/update/upload", a.auth(a.apiUpdateUpload))
 	mux.HandleFunc("POST /api/update/fetch", a.auth(a.apiUpdateFetch))
@@ -311,6 +312,13 @@ func decodeArgs(w http.ResponseWriter, r *http.Request) (map[string]string, bool
 		out[k] = jsonString(v)
 	}
 	return out, true
+}
+
+// apiPresetDomains serves the list behind the "add domains" buttons: DOMAINS_FILE when it
+// has domains in it, otherwise the list built into the program.
+func (a *App) apiPresetDomains(w http.ResponseWriter, r *http.Request, _ *session) {
+	d, src := presetDomains(a.cfg.DomainsFile)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "domains": d, "source": src})
 }
 
 // ── Pages and login ──────────────────────────────────────────────────────────

@@ -107,11 +107,12 @@ Edit `/etc/dnsbench/dnsbench.conf`, which is plain `KEY=value` lines, then run `
 | `NO_TLS` | `false` | Serve plain HTTP. Only do this behind a proxy that handles TLS |
 | `STATE_DIR` | `/var/lib/dnsbench` | Where the certificate and the schedules are kept |
 | `SCHEDULES_FILE` | blank | Where schedules are stored. Blank means `STATE_DIR/schedules.json` |
+| `DOMAINS_FILE` | `/etc/dnsbench/domains.txt` | The list the add-domains icon puts into a query box (Benchmark tab and schedule editor). Plain text, one domain per line; blank lines and lines starting with `#` are ignored. It is read on every click, so edits apply without a restart. If it is missing or empty, the list built into dnsbench is used. The installer creates it only when it is absent, so your edits survive upgrades |
 | `PAM_SERVICE` | blank | The PAM service name. Blank means `/etc/pam.d/dnsbench` |
 | `LOGIN_GROUP` | `dnsbench` | Only members of this group can sign in |
 | `ALLOW_UPDATES` | `true` | Whether signed-in users can update dnsbench from the Updates page. `false` turns it off (see Updating from the web page). Anything other than `true` or `false` stops the service from starting |
 
-Every setting also has a command-line flag (`--host`, `--port`, `--tls-cert`, `--tls-key`, `--no-tls`, `--state-dir`, `--schedules-file`, `--pam-service`, `--login-group`), and a flag beats the config file. `dnsbench --help` lists them all and `dnsbench --version` prints the version.
+Every setting also has a command-line flag (`--host`, `--port`, `--tls-cert`, `--tls-key`, `--no-tls`, `--state-dir`, `--schedules-file`, `--domains-file`, `--pam-service`, `--login-group`), and a flag beats the config file. `dnsbench --help` lists them all and `dnsbench --version` prints the version.
 
 ---
 

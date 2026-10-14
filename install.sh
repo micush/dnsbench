@@ -526,6 +526,17 @@ else
 
 fi
 
+if [[ ! -f "$CONF_DIR/domains.txt" ]]; then
+
+  install -m 644 "$SRC_DIR/domains.txt" "$CONF_DIR/domains.txt"
+  ok "Preset domain list written: $CONF_DIR/domains.txt"
+
+else
+
+  info "Preset domain list kept: $CONF_DIR/domains.txt"
+
+fi
+
 if [[ -f "$CONF_DIR/schedules.json" &&
       ! -f "$STATE_DIR/schedules.json" ]]; then
 

@@ -21,6 +21,7 @@ type Config struct {
 	TLSKey        string
 	StateDir      string
 	SchedulesFile string
+	DomainsFile   string // the editable list behind the "add domains" buttons
 	PAMService    string
 	LoginGroup    string
 	AllowUpdates  bool // the Updates page may upload, build and install a new release
@@ -69,6 +70,7 @@ func loadConfig(args []string, getenv func(string) string, out io.Writer) (*Conf
 		TLSKey:        envOr(getenv, "TLS_KEY", ""),
 		StateDir:      envOr(getenv, "STATE_DIR", "/var/lib/dnsbench"),
 		SchedulesFile: envOr(getenv, "SCHEDULES_FILE", ""),
+		DomainsFile:   envOr(getenv, "DOMAINS_FILE", defaultDomainsFile),
 		PAMService:    envOr(getenv, "PAM_SERVICE", ""),
 		LoginGroup:    envOr(getenv, "LOGIN_GROUP", defaultLoginGroup),
 		AllowUpdates:  allowUpdates,
@@ -83,6 +85,7 @@ func loadConfig(args []string, getenv func(string) string, out io.Writer) (*Conf
 	fs.StringVar(&cfg.TLSKey, "tls-key", cfg.TLSKey, "PEM private key file (TLS_KEY)")
 	fs.StringVar(&cfg.StateDir, "state-dir", cfg.StateDir, "directory for the generated certificate and schedules (STATE_DIR)")
 	fs.StringVar(&cfg.SchedulesFile, "schedules-file", cfg.SchedulesFile, "where schedules are stored (SCHEDULES_FILE)")
+	fs.StringVar(&cfg.DomainsFile, "domains-file", cfg.DomainsFile, "preset domains for the add-domains buttons, one per line (DOMAINS_FILE)")
 	fs.StringVar(&cfg.PAMService, "pam-service", cfg.PAMService, "PAM service name (PAM_SERVICE)")
 	fs.StringVar(&cfg.LoginGroup, "login-group", cfg.LoginGroup, "only members of this group may sign in (LOGIN_GROUP)")
 	fs.BoolVar(&cfg.AllowUpdates, "allow-updates", cfg.AllowUpdates, "let signed-in users upload and install a new release from the web UI (ALLOW_UPDATES)")

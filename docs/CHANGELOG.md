@@ -1,5 +1,21 @@
 # Changelog
 
+## [v23] - 2026-10-14 — The preset domain list comes from an editable text file
+
+### Added
+- **`DOMAINS_FILE`** (flag `--domains-file`, default `/etc/dnsbench/domains.txt`): a plain text file, one domain per line, blank lines and `#` comments ignored. The add-domains icons (Benchmark tab and schedule editor) now fetch it from the new `GET /api/preset-domains` (sign-in required) instead of a list baked into the page, so an administrator can change the list with a text editor. The file is read on every click: no restart needed.
+- If the file is missing, unreadable or has no domains, the list built into the program (`source/domains.txt`, the 561 domains from v22, embedded) is used.
+- `install.sh` writes `/etc/dnsbench/domains.txt` from `source/domains.txt` only when it does not exist, so upgrades keep the administrator's edits. `contrib/dnsbench.conf` documents the setting. README and CLAUDE.md updated.
+
+### Changed
+- The icon tooltips say "Add the preset domains" (the count is no longer fixed); the note beside the icon says how many domains were added.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball, including new tests for parsing, file-then-built-in fallback, edits applied without a restart, the endpoint, and the login requirement; `bash -n install.sh`; cross-compile of all listed architectures.
+
+### Not verified
+- `install.sh` was not run (it would install on this machine), so the seeding of `domains.txt` is untested beyond `bash -n`. Not viewed in a browser (`contrib/uitest/ui.js` not run). When `DNSBENCH_CONF_DIR` points somewhere other than `/etc/dnsbench`, set `DOMAINS_FILE` to match. Only the native amd64 cgo build is verified with PAM.
+
 ## [v22] - 2026-10-14 — Preset domain list pruned to 561 that resolve
 
 ### Changed
