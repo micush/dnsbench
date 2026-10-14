@@ -1,5 +1,27 @@
 # Changelog
 
+## [v17] - 2026-10-14 — Shorter Updates page text
+
+### Changed
+- Updates page: removed the intro line under the heading ("Update dnsbench by uploading a release archive…"); the upload hint now reads "Select a release archive. It is checked and staged."; the progress text while fetching from GitHub now reads "Downloading…". Wording only; no behaviour changed.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball; cross-compile of all listed architectures.
+
+### Not verified
+- The page was not viewed in a browser (`contrib/uitest/ui.js` not run). Only the native amd64 cgo build is verified with PAM.
+
+## [v16] - 2026-10-14 — README: single install command
+
+### Changed
+- The README's Installing section now shows only the plain `get.sh | sudo bash` one-liner; the second example pinning `--version v13` was removed. `get.sh` itself is unchanged and still accepts `--version`.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball; cross-compile of all listed architectures.
+
+### Not verified
+- Only the native amd64 cgo build is verified with PAM. Nothing in the code changed, so the browser UI tests were not re-run.
+
 ## [v15] - 2026-10-14 — Preset popular domains for Query targets
 
 ### Added

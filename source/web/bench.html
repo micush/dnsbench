@@ -455,7 +455,6 @@
   <div id="page-updates" class="page">
     <div style="margin-bottom:20px">
       <h1 style="font-size:1.859rem;font-weight:600;color:var(--text);margin:0 0 2px"><i class="bi bi-upload text-primary me-2"></i>Updates</h1>
-      <p style="font-size:1.014rem;color:var(--muted);margin:0">Update dnsbench by uploading a release archive. It is built on this server and installed in place.</p>
     </div>
     <div id="updNotices"></div>
     <div id="updStats" class="upd-stats"></div>
@@ -466,7 +465,7 @@
         <button id="updUploadBtn" class="run-btn" style="width:auto;padding:8px 18px;font-size:1.014rem" onclick="updUpload()">Upload</button>
       </header>
       <div class="body">
-        <p class="hint" style="margin:0 0 8px">Choose the <code>dnsbench_vN.tgz</code> (or .zip) archive of a newer release. It is checked and staged on this server; nothing is installed yet. Or tick <em>Fetch from online</em> to get the newest release from GitHub instead.</p>
+        <p class="hint" style="margin:0 0 8px">Select a release archive. It is checked and staged.</p>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 28px">
           <input id="updFile" type="file" accept=".tgz,.tar.gz,.zip,application/gzip,application/zip" aria-label="Release archive" style="color:var(--text)">
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--text);cursor:pointer"><input id="updOnline" type="checkbox" onchange="updOnlineToggle()"> Fetch from online</label>
@@ -2159,7 +2158,7 @@ function updOnlineToggle(){
 async function updFetchOnline(){
   const btn=document.getElementById('updUploadBtn'); btn.disabled=true;
   updSay('','');
-  updOnlineSay('','Fetching the newest release from GitHub…');
+  updOnlineSay('','Downloading…');
   try{
     const r=await fetch('/api/update/fetch',{method:'POST'});
     if(r.status===401){ updServerGone('Your session ended: you need to sign in again.'); return; }

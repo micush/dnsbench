@@ -37,7 +37,6 @@ Or install straight from GitHub with one line. It downloads the newest release o
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/micush/dnsbench/HEAD/get.sh | sudo bash
-curl -fsSL https://raw.githubusercontent.com/micush/dnsbench/HEAD/get.sh | sudo bash -s -- --version v13
 ```
 
 The installer does five things:
