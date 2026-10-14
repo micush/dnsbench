@@ -1,5 +1,16 @@
 # Changelog
 
+## [v15] - 2026-10-14 — Preset popular domains for Query targets
+
+### Added
+- **A "add popular domains" icon beside the Query targets heading** (Benchmark tab). Clicking it appends 569 popular domains (google.com, youtube.com, … wikiquote.org) to the textarea, skipping any already listed (case-insensitive), and scrolls to the end. Existing lines are kept. The result is saved to the same localStorage key as manual edits. It reuses the existing `bi-list-check` icon, so `ui.css` is unchanged.
+
+### Verified
+- `CGO_ENABLED=0 go test ./...` passes, including `TestEveryIconUsedHasARule`. `go vet`, the cross-compile of all listed architectures and a test run from the extracted tarball were repeated for this release.
+
+### Not verified
+- The button was not clicked in a browser (`contrib/uitest/ui.js` was not run). Only the native amd64 cgo build is verified with PAM; the other architectures were only compiled with the stub.
+
 ## [v14] - 2026-10-10 — A one-line installer, get.sh
 
 ### Added
