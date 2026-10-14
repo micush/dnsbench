@@ -11,6 +11,9 @@
 ### Not verified
 - Not viewed in a browser (`contrib/uitest/ui.js` not run). Only the native amd64 cgo build is verified with PAM.
 
+### Packaging fix
+- `distribute-dnsbench` (the maintainer's own release helper) is no longer included in the archive. Nothing in the code, tests or behaviour changed, so the version stays 21.
+
 ## [v20] - 2026-10-14 — Click a run's error count to see the errors
 
 ### Added
