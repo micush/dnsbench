@@ -60,6 +60,8 @@ type App struct {
 
 	histMu  sync.Mutex
 	history []histRun // newest first
+
+	errLists errStore // the error list of each recent run
 }
 
 func newApp(cfg *Config) *App {
@@ -172,6 +174,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/job/{id}", a.auth(a.apiJobStatus))
 	mux.HandleFunc("GET /api/job/{id}/stream", a.auth(a.apiJobStream))
 	mux.HandleFunc("GET /api/job/{id}/output", a.auth(a.apiJobOutput))
+	mux.HandleFunc("GET /api/job/{id}/errors", a.auth(a.apiJobErrors))
 	mux.HandleFunc("POST /api/job/{id}/kill", a.auth(a.apiJobKill))
 
 	mux.HandleFunc("GET /api/schedules", a.auth(a.apiSchedulesList))
@@ -319,6 +322,17 @@ func decodeArgs(w http.ResponseWriter, r *http.Request) (map[string]string, bool
 func (a *App) apiPresetDomains(w http.ResponseWriter, r *http.Request, _ *session) {
 	d, src := presetDomains(a.cfg.DomainsFile)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "domains": d, "source": src})
+}
+
+// apiJobErrors serves the full error list of a finished run: every (domain, reason) pair with
+// its count. The server keeps the lists of the last keepErrLists runs.
+func (a *App) apiJobErrors(w http.ResponseWriter, r *http.Request, _ *session) {
+	l := a.errLists.get(r.PathValue("id"))
+	if l == nil {
+		jerr(w, http.StatusNotFound, "The server no longer has the error list for this run")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "errors": l.Rows, "other": l.Other, "total": l.Total})
 }
 
 // ── Pages and login ──────────────────────────────────────────────────────────

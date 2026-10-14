@@ -96,7 +96,7 @@ func TestProtectedRoutesRequireLogin(t *testing.T) {
 	s := newTestServer(t)
 	for _, r := range []struct{ method, path string }{
 		{"GET", "/api/jobs"}, {"POST", "/api/start-job"}, {"GET", "/api/job/x"}, {"GET", "/api/job/x/stream"},
-		{"GET", "/api/job/x/output"}, {"POST", "/api/job/x/kill"}, {"GET", "/api/schedules"},
+		{"GET", "/api/job/x/output"}, {"GET", "/api/job/x/errors"}, {"POST", "/api/job/x/kill"}, {"GET", "/api/schedules"},
 		{"GET", "/api/scheduler-history"}, {"POST", "/api/schedules/add"}, {"POST", "/api/schedules/update"},
 		{"POST", "/api/schedules/delete"}, {"POST", "/api/schedules/pause"}, {"POST", "/api/schedules/resume"},
 		{"POST", "/api/schedules/run"}, {"GET", "/api/readme-html"}, {"GET", "/api/license-html"},

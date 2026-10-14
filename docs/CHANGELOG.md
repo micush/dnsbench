@@ -1,5 +1,20 @@
 # Changelog
 
+## [v24] - 2026-10-14 — Clicking a run's errors shows the full error list
+
+### Changed
+- Clicking "N errors" on a result card now shows **every error the run had**, not the 5 sample errors: each failing domain with its reason (NXDOMAIN, SERVFAIL, timeout, …) and how many times it failed, most frequent first, under a heading with the totals. Identical failures are counted rather than repeated, so a run with 64,000 errors on 560 domains is a 560-line list.
+- The run counts each error per (domain, reason) in the workers' private tallies and merges them with the other statistics, so the hot path only does a map increment per failed query. The terminal output and the saved history are unchanged (the five "Sample errors" lines are still printed there).
+
+### Added
+- `GET /api/job/{id}/errors` (sign-in required): the full list as JSON. The server remembers the lists of the last 100 runs (`keepErrLists`), at most 5,000 distinct (domain, reason) pairs per run; errors beyond that are reported as `other`. An older run, or one from before this version or before a restart, shows "The server no longer has the error list for this run". README documents it.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball, including new tests for the tally (counting, order, limit, merge), the 100-run store, a real run against a fake NXDOMAIN server (the counts add up to the errors reported), a run without errors, the endpoint and its login requirement; cross-compile of all listed architectures.
+
+### Not verified
+- Throughput with many errors was not measured, the race detector was not run (it needs the PAM headers this sandbox lacks), and the page was not viewed in a browser (`contrib/uitest/ui.js` not run). Only the native amd64 cgo build is verified with PAM.
+
 ## [v23] - 2026-10-14 — The preset domain list comes from an editable text file
 
 ### Added

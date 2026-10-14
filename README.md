@@ -256,7 +256,7 @@ curl -sk "$BASE/api/job/$JOB" -H "X-Session-Token: $TOK"
 curl -sk -X POST "$BASE/api/job/$JOB/kill" -H "X-Session-Token: $TOK"
 ```
 
-`GET /api/job/{id}/stream` gives the same output as server-sent events, which is what the browser uses. Someone who connects late still gets every line from the start. `GET /api/jobs` lists the jobs the server still remembers.
+`GET /api/job/{id}/stream` gives the same output as server-sent events, which is what the browser uses. Someone who connects late still gets every line from the start. `GET /api/jobs` lists the jobs the server still remembers. `GET /api/job/{id}/errors` returns the full error list of a finished run: every failing domain with its reason and how many times it failed (`errors`, most frequent first), plus `total`, and `other` for errors on pairs beyond the 5,000 distinct ones kept per run. The server remembers the lists of the last 100 runs; an older run answers `404`. This is what opens when you click a result's error count in the page.
 
 ### Updates
 

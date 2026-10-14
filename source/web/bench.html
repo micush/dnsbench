@@ -1976,28 +1976,31 @@ function toggleOutput(idx){
     :'<i class="bi bi-terminal-fill" style="font-size:0.975rem"></i>';
 }
 
-// The RCODE breakdown and "Sample errors" lines of a run's saved output.
-function errorDetailLines(output){
-  const out=[]; let inSamples=false;
-  (output||[]).forEach(t=>{
-    const p=String(t).replace(/§[a-z]+§/g,'');
-    if(/^\s*RCODE\s/.test(p)){ out.push(t); inSamples=false; }
-    else if(/^\s*Sample errors/.test(p)){ out.push(t); inSamples=true; }
-    else if(inSamples){ if(!p.trim()||p.includes('────')) inSamples=false; else out.push(t); }
-  });
-  return out;
-}
-
-function toggleErrors(idx,btn){
+// Clicking a run's error count shows every error it had: each failing domain with its reason and
+// how many times it happened. The server keeps these lists for the most recent runs.
+async function toggleErrors(idx,btn){
   const area=btn.closest('.run-card').querySelector('.run-err-area');
   const open=area.style.display==='none';
-  if(open && !area.childElementCount){
-    const lines=errorDetailLines((runHistory[idx]||{}).output);
-    if(lines.length) area.appendChild(buildOutputEl(lines));
-    else{ const m=document.createElement('div'); m.className='hint'; m.style.margin='0'; m.textContent='No error details were saved for this run.'; area.appendChild(m); }
-  }
   area.style.display=open?'block':'none';
   btn.setAttribute('aria-expanded',open?'true':'false');
+  if(!open || area.dataset.loaded) return;
+  const note=t=>{ area.textContent=''; const m=document.createElement('div'); m.className='hint'; m.style.margin='0'; m.textContent=t; area.appendChild(m); };
+  const id=(runHistory[idx]||{}).id;
+  if(!id){ note('No error list is available for this run.'); return; }
+  note('Loading the errors…');
+  try{
+    const r=await fetch('/api/job/'+encodeURIComponent(id)+'/errors');
+    if(r.status===401){ note('Your session ended: sign in again.'); return; }
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok){ note(d.error||('Could not load the errors ('+r.status+').')); if(r.status===404) area.dataset.loaded='1'; return; }
+    if(!d.errors.length){ note('This run had no errors.'); area.dataset.loaded='1'; return; }
+    const w=String(d.errors[0].count.toLocaleString()).length;
+    const lines=['§hdr§'+d.total.toLocaleString()+' errors · '+d.errors.length.toLocaleString()+' different domain / reason pairs§rst§'];
+    d.errors.forEach(e=>lines.push(e.count.toLocaleString().padStart(w)+' ×  §err§'+e.domain+'§rst§  '+e.reason));
+    if(d.other>0) lines.push('§dim§… and '+d.other.toLocaleString()+' more errors on other domain / reason pairs, not listed§rst§');
+    area.textContent=''; area.appendChild(buildOutputEl(lines));
+    area.dataset.loaded='1';
+  }catch(e){ note('Could not load the errors: '+e.message); }
 }
 
 function buildOutputEl(lines){

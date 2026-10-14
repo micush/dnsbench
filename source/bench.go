@@ -298,10 +298,11 @@ type sharedStats struct {
 	done atomic.Uint64 // completed queries (answered, failed or timed out)
 	errs atomic.Uint64
 
-	mu      sync.Mutex
-	lat     hist
-	rcodes  [rcSlots]uint64
-	samples []errSample
+	mu       sync.Mutex
+	lat      hist
+	rcodes   [rcSlots]uint64
+	samples  []errSample
+	errTally errTally // every distinct (domain, reason) with its count
 }
 
 // localStats is a worker-private accumulator, flushed periodically.
@@ -312,6 +313,7 @@ type localStats struct {
 	done      uint64
 	errs      uint64
 	samples   []errSample
+	errTally  errTally
 	lastFlush time.Time
 }
 
@@ -338,6 +340,7 @@ func (l *localStats) bad(slot int, domain string) {
 	l.errs++
 	l.done++
 	l.addSample(domain, rcodeLabel(slot))
+	l.errTally.add(errKey{domain, rcodeLabel(slot)}, 1, maxLocalErrs)
 }
 
 // fail records a transport-level failure (timeout, connection error, ...).
@@ -346,6 +349,7 @@ func (l *localStats) fail(domain, reason string) {
 	l.errs++
 	l.done++
 	l.addSample(domain, reason)
+	l.errTally.add(errKey{domain, reason}, 1, maxLocalErrs)
 }
 
 // note records a diagnostic that does not correspond to one query.
@@ -382,7 +386,9 @@ func (l *localStats) flush() {
 			s.samples = append(s.samples, e)
 		}
 	}
+	s.errTally.merge(&l.errTally, maxErrDistinct)
 	s.mu.Unlock()
+	l.errTally.reset()
 	l.lat.reset()
 	l.rcodes = [rcSlots]uint64{}
 	l.done, l.errs = 0, 0
@@ -567,7 +573,9 @@ loop:
 
 	c.stats.mu.Lock()
 	lines := formatResults(&c.stats, c.stats.done.Load(), c.stats.errs.Load(), elapsedTotal.Seconds(), p, qpsTicks)
+	errLst := c.stats.errTally.list()
 	c.stats.mu.Unlock()
+	a.errLists.put(j.ID, errLst)
 	for _, l := range lines {
 		j.emit(l)
 	}
