@@ -1,5 +1,16 @@
 # Changelog
 
+## [v22] - 2026-10-14 — Preset domain list pruned to 561 that resolve
+
+### Changed
+- The "add popular domains" list (Benchmark tab and schedule dialog) no longer contains `bet.br`, `usgs.gov`, `tdameritrade.com`, `todoinst.com`, `pocket.com`, `tsinghua.edu.cn`, `u-tokyo.ac.jp` and `gouv.fr`, which did not resolve when the maintainer tested the list. It now holds 561 domains, all of which the maintainer confirmed resolve; the icon tooltips say 561.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball; cross-compile of all listed architectures. The list was resolved by the maintainer, not in the build sandbox (it has no DNS).
+
+### Not verified
+- Not viewed in a browser (`contrib/uitest/ui.js` not run). Only the native amd64 cgo build is verified with PAM.
+
 ## [v21] - 2026-10-14 — No doubled version in the fetch message
 
 ### Changed
