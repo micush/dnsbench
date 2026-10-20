@@ -1,7 +1,0 @@
-#%PAM-1.0
-# /etc/pam.d/dnsdir — RHEL / Fedora / Rocky / Alma
-# Password check for the dnsdir web GUI. Group membership (default group "dnsdir")
-# is enforced by dnsdir itself; PAM only proves who the user is and that the
-# account is valid.
-auth       substack     system-auth
-account    include      system-auth

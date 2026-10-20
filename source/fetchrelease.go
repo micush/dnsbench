@@ -8,19 +8,19 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// The newest release fetched from GitHub, for Updates ▸ Upload a release when "Get the newest release from GitHub" is
-// ticked.  It looks for the tag the way get.sh does: the newest published release, otherwise the highest v<number> tag,
-// downloads that tag's source archive and hands it to the same staging as an uploaded file.  Variables only so tests can
-// point them at a fake server.
-const defaultRepo = "micush/dnsdir"
-
+// The newest release fetched from GitHub, for Updates ▸ 1. Upload a release when "Fetch from online" is ticked (the same
+// as in ddgw). It finds the tag the way a person would: the newest published release, otherwise the highest v<number> tag
+// of the repository, downloads that tag's source archive and hands it to the same staging as an uploaded file, so it is
+// checked exactly as an upload is and nothing is installed until "Update now". The repository is fixed (it is not a setting
+// and nothing the signed-in user types reaches the request); the variables exist only so tests can point them at a fake.
 var (
-	ghRepo = defaultRepo
+	ghRepo = "micush/dnsbench"
 	ghAPI  = "https://api.github.com"
 	ghHost = "https://github.com"
 )
@@ -37,7 +37,7 @@ func ghGet(ctx context.Context, url string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "dnsdir/"+version())
+	req.Header.Set("User-Agent", "dnsbench/"+version())
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := (&http.Client{Timeout: fetchTimeout}).Do(req)
 	if err != nil {
@@ -57,7 +57,7 @@ func ghGet(ctx context.Context, url string, limit int64) ([]byte, error) {
 	return b, nil
 }
 
-// numericTagLess orders v215 < v1000 and 1.2 < 1.10.
+// numericTagLess orders v9 < v10 and 1.2 < 1.10.
 func numericTagLess(a, b string) bool {
 	pa, pb := strings.Split(strings.TrimPrefix(a, "v"), "."), strings.Split(strings.TrimPrefix(b, "v"), ".")
 	for i := 0; i < len(pa) || i < len(pb); i++ {
@@ -75,110 +75,66 @@ func numericTagLess(a, b string) bool {
 	return false
 }
 
-// latestTag is the newest published release, or else the highest v<number> tag of the repository.
-func latestTag(ctx context.Context, repo string) (string, error) {
-	if b, err := ghGet(ctx, ghAPI+"/repos/"+repo+"/releases/latest", 1<<20); err == nil {
+// candidateTags lists the tags to try, best first: the newest published release, then the repository's v<number> tags from
+// the highest down (at most 10). More than one is returned because a repository's tags can include ones that are not
+// dnsbench releases; the caller skips those.
+func candidateTags(ctx context.Context) ([]string, error) {
+	var out []string
+	if b, err := ghGet(ctx, ghAPI+"/repos/"+ghRepo+"/releases/latest", 1<<20); err == nil {
 		var r struct {
 			Tag string `json:"tag_name"`
 		}
 		if json.Unmarshal(b, &r) == nil && r.Tag != "" && ghTagRe.MatchString(r.Tag) {
-			return r.Tag, nil
+			out = append(out, r.Tag)
 		}
 	}
-	b, err := ghGet(ctx, ghAPI+"/repos/"+repo+"/tags?per_page=100", 4<<20)
+	b, err := ghGet(ctx, ghAPI+"/repos/"+ghRepo+"/tags?per_page=100", 4<<20)
 	if err != nil {
-		return "", fmt.Errorf("cannot reach GitHub: %w", err)
+		if len(out) > 0 {
+			return out, nil
+		}
+		return nil, fmt.Errorf("cannot reach GitHub: %w", err)
 	}
 	var tags []struct {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(b, &tags); err != nil {
-		return "", errors.New("GitHub's answer was not understood")
+		if len(out) > 0 {
+			return out, nil
+		}
+		return nil, errors.New("GitHub's answer was not understood")
 	}
-	best := ""
+	var nums []string
 	for _, t := range tags {
-		if ghNumTagRe.MatchString(t.Name) && (best == "" || numericTagLess(best, t.Name)) {
-			best = t.Name
+		if ghNumTagRe.MatchString(t.Name) && (len(out) == 0 || t.Name != out[0]) {
+			nums = append(nums, t.Name)
 		}
 	}
-	if best == "" {
-		return "", errors.New("no release or v<number> tag found in " + repo + " (rate limit or no tags yet)")
+	sort.Slice(nums, func(i, j int) bool { return numericTagLess(nums[j], nums[i]) })
+	out = append(out, nums...)
+	if len(out) > 10 {
+		out = out[:10]
 	}
-	return best, nil
+	if len(out) == 0 {
+		return nil, errors.New("no release or v<number> tag found in " + ghRepo + " (rate limit or no tags yet)")
+	}
+	return out, nil
 }
 
-// fetchRelease downloads the source archive of the newest tag.
-func fetchRelease(ctx context.Context, repo string) (body []byte, tag string, err error) {
-	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
-	defer cancel()
-	tag, err = latestTag(ctx, repo)
+// latestTag is the first candidate.
+func latestTag(ctx context.Context) (string, error) {
+	c, err := candidateTags(ctx)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
-	body, err = ghGet(ctx, ghHost+"/"+repo+"/archive/refs/tags/"+tag+".tar.gz", maxUploadBytes)
-	if err != nil {
-		return nil, tag, fmt.Errorf("download of %s failed: %w", tag, err)
-	}
-	return body, tag, nil
+	return c[0], nil
 }
 
-func (w *WebServer) handleUpdateFetch(rw http.ResponseWriter, r *http.Request, s *session) {
-	repo := w.mg.upd.Repo()
-	body, tag, err := fetchRelease(r.Context(), repo)
+// fetchTag downloads the source archive of one tag.
+func fetchTag(ctx context.Context, tag string) ([]byte, error) {
+	body, err := ghGet(ctx, ghHost+"/"+ghRepo+"/archive/refs/tags/"+tag+".tar.gz", maxUploadBytes)
 	if err != nil {
-		jsonError(rw, http.StatusUnprocessableEntity, err.Error())
-		return
+		return nil, fmt.Errorf("download of %s failed: %w", tag, err)
 	}
-	warnf("web: %q fetched release %s of %s from GitHub (%d bytes, from %s)", s.user, tag, repo, len(body), clientIP(r))
-	ver, err := w.mg.UpdateUpload(body, s.user)
-	if err != nil {
-		jsonError(rw, http.StatusUnprocessableEntity, tag+": "+err.Error())
-		return
-	}
-	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"version": ver, "tag": tag}})
-}
-
-// repoRe is an owner or a repository name on GitHub.
-var repoRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
-
-// normalizeRepo reads the online repository as an admin writes it: https://github.com/owner/repo (also with .git, a trailing
-// slash, or without the https://), or just owner/repo.  It returns owner/repo, or "" for the default repository.  Only
-// github.com is accepted: the daemon builds and installs what it downloads, so the source is the admin's choice, but the
-// host is fixed.
-func normalizeRepo(in string) (string, error) {
-	s := strings.TrimSpace(in)
-	if s == "" || strings.EqualFold(s, "default") {
-		return "", nil
-	}
-	for _, p := range []string{"https://", "http://"} {
-		if len(s) >= len(p) && strings.EqualFold(s[:len(p)], p) {
-			s = s[len(p):]
-			break
-		}
-	}
-	if strings.HasPrefix(strings.ToLower(s), "www.") {
-		s = s[4:]
-	}
-	if strings.HasPrefix(strings.ToLower(s), "github.com/") {
-		s = s[len("github.com/"):]
-	} else if i := strings.Index(s, "/"); i > 0 && strings.Contains(s[:i], ".") {
-		return "", errors.New("only github.com repositories are supported")
-	}
-	s = strings.TrimSuffix(strings.TrimRight(s, "/"), ".git")
-	parts := strings.Split(s, "/")
-	if len(parts) != 2 || !repoRe.MatchString(parts[0]) || !repoRe.MatchString(parts[1]) || parts[1] == "." || parts[1] == ".." {
-		return "", errors.New("write the repository as https://github.com/owner/repo")
-	}
-	if strings.EqualFold(s, defaultRepo) {
-		return "", nil
-	}
-	return s, nil
-}
-
-// Repo is the repository to fetch releases from: the one set in the update settings, or the default.
-func (u *Updater) Repo() string {
-	if r := u.Intent().Repo; r != "" {
-		return r
-	}
-	return ghRepo
+	return body, nil
 }
