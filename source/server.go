@@ -3,6 +3,7 @@ package main
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -502,11 +503,16 @@ func (a *App) apiStartJob(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 	if strings.TrimSpace(args["server"]) == "" {
-		jerr(w, http.StatusBadRequest, "Server address is required")
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "Server address is required", "field": "server"})
 		return
 	}
 	if _, _, err := parseParams(args, cpuThreads()); err != nil {
-		jerr(w, http.StatusBadRequest, err.Error())
+		resp := map[string]any{"ok": false, "error": err.Error()}
+		var fe *fieldError
+		if errors.As(err, &fe) {
+			resp["field"] = fe.Field
+		}
+		writeJSON(w, http.StatusBadRequest, resp)
 		return
 	}
 	j := a.startJob(args, s.user)

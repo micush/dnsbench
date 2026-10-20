@@ -368,17 +368,25 @@ func TestStartJobValidation(t *testing.T) {
 	s := newTestServer(t)
 	hdr := map[string]string{"X-Session-Token": s.apiToken(t)}
 	for _, c := range []struct {
-		body map[string]any
-		want string
+		body  map[string]any
+		want  string
+		field string // the input the page should mark red
 	}{
-		{map[string]any{"server": ""}, "Server address is required"},
-		{map[string]any{}, "Server address is required"},
-		{map[string]any{"server": "1.2.3.4", "protocol": "doq"}, "DoQ"},
-		{map[string]any{"server": "1.2.3.4", "protocol": "smtp"}, "unknown protocol"},
+		{map[string]any{"server": ""}, "Server address is required", "server"},
+		{map[string]any{}, "Server address is required", "server"},
+		{map[string]any{"server": "1.2.3.4", "protocol": "doq"}, "DoQ", "protocol"},
+		{map[string]any{"server": "1.2.3.4", "protocol": "smtp"}, "unknown protocol", "protocol"},
+		{map[string]any{"server": "[::1]:99999"}, "invalid port", "server"},
+		{map[string]any{"server": "bad host name"}, "invalid server", "server"},
+		{map[string]any{"server": "a@b.example"}, "invalid server", "server"},
+		{map[string]any{"server": "https://h.example/dns\x01", "protocol": "doh"}, "invalid path", "server"},
 	} {
 		resp, m := s.postJSON(t, "/api/start-job", c.body, hdr)
 		if resp.StatusCode != 400 || !strings.Contains(m["error"].(string), c.want) {
 			t.Errorf("%v: %d %v", c.body, resp.StatusCode, m)
+		}
+		if m["field"] != c.field {
+			t.Errorf("%v: field = %v, want %q", c.body, m["field"], c.field)
 		}
 	}
 }

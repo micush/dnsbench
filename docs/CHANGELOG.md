@@ -1,5 +1,21 @@
 # Changelog
 
+## [v25] - 2026-10-20 — Benchmark page marks the invalid field red
+
+### Changed
+- When **Run Benchmark** is refused because of a field value, the page now marks that input red, shows the reason under it, switches back to the Setup tab and focuses the field. The mark clears as soon as the user edits the field. Covered: the **Server** field (empty, bad port, bad hostname characters, bad DoH path) and the **Protocol** selector (unknown protocol, DoQ).
+- `POST /api/start-job` still answers 400 with `{"ok":false,"error":"…"}`, and now adds `"field"` (`server` or `protocol`) when the error belongs to one input. Existing clients that ignore it are unaffected. README documents it.
+- Internally `parseParams` returns a `*fieldError` for those cases; its message text is unchanged.
+
+### Not changed
+- Values that are silently corrected (Workers, Queue, Duration, Count, Rate limit, Query type) are still not flagged, because the run starts with the corrected value. A server name that fails to resolve is reported in the output after the run starts, and its field is not marked.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...`, with `TestStartJobValidation` extended to check the `field` value and four more rejections (bad port, spaces in host, `@` in host, control character in DoH path); `node --check` on both inline scripts; the page in real Chromium (light and dark scheme) with the start-job endpoint stubbed to a 400: field turns red, message appears, Setup tab shown, mark and message cleared on edit, empty server flagged client-side; screenshot checked.
+
+### Not verified
+- `contrib/uitest/ui.js` was not run and the cgo/PAM build was not tested, because `libpam0g-dev` is not installable in this sandbox. The light-scheme colour was not checked in a served page (the standalone test page did not load `theme.js`); it uses the existing `--term-err` token, which both themes define. Only the native amd64 cgo build is verified with PAM.
+
 ## [v24] - 2026-10-14 — Clicking a run's errors shows the full error list
 
 ### Changed

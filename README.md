@@ -225,6 +225,8 @@ JOB=$(curl -sk $BASE/api/start-job -H 'Content-Type: application/json' \
 
 Only one benchmark runs at a time. Starting a new one stops any that is still running. Numbers and booleans can be sent either as real JSON numbers and booleans or as strings.
 
+A request that is refused gets a 400 with `{"ok": false, "error": "…"}`. When the problem is one input, the response also has `"field"` (`server` or `protocol`), which the Benchmark page uses to mark that input red.
+
 | Field | Default | What it means |
 |---|---|---|
 | `server` | required | The target: an address, `host:port`, or a DoH URL |

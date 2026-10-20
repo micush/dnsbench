@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -111,6 +110,20 @@ func parseDuration(s string) time.Duration {
 	return time.Duration(n * float64(mult))
 }
 
+// fieldError is a parameter error that belongs to one input on the Benchmark
+// page. Field is the JSON key the UI sends ("server", "protocol"), and the page
+// uses it to mark that input red.
+type fieldError struct {
+	Field string
+	Msg   string
+}
+
+func (e *fieldError) Error() string { return e.Msg }
+
+func fieldErrf(field, format string, a ...any) error {
+	return &fieldError{Field: field, Msg: fmt.Sprintf(format, a...)}
+}
+
 func parseParams(args map[string]string, cpu int) (benchParams, []string, error) {
 	var p benchParams
 	var warnings []string
@@ -126,9 +139,9 @@ func parseParams(args map[string]string, cpu int) (benchParams, []string, error)
 	switch p.protocol {
 	case "udp", "tcp", "dot", "doh":
 	case "doq":
-		return p, nil, errors.New("DoQ is not supported")
+		return p, nil, fieldErrf("protocol", "DoQ is not supported")
 	default:
-		return p, nil, fmt.Errorf("unknown protocol %q", p.protocol)
+		return p, nil, fieldErrf("protocol", "unknown protocol %q", p.protocol)
 	}
 	host, portText, path := parseServer(p.server, p.protocol)
 	port, err := checkTarget(p.server, p.protocol, host, portText, path)
@@ -229,25 +242,25 @@ func parseServer(server, protocol string) (host, port, path string) {
 func checkTarget(server, protocol, host, portText, path string) (int, error) {
 	port, err := strconv.Atoi(portText)
 	if err != nil || port < 1 || port > 65535 {
-		return 0, fmt.Errorf("invalid port %q", portText)
+		return 0, fieldErrf("server", "invalid port %q", portText)
 	}
 	if host == "" || len(host) > 253 {
-		return 0, fmt.Errorf("invalid server %q", server)
+		return 0, fieldErrf("server", "invalid server %q", server)
 	}
 	if net.ParseIP(host) == nil {
 		for _, r := range host {
 			if r <= ' ' || r == 0x7f || strings.ContainsRune("/\\?#@:[]%\"<>`", r) {
-				return 0, fmt.Errorf("invalid server %q", server)
+				return 0, fieldErrf("server", "invalid server %q", server)
 			}
 		}
 	}
 	if protocol == "doh" {
 		if !strings.HasPrefix(path, "/") {
-			return 0, fmt.Errorf("invalid path %q", path)
+			return 0, fieldErrf("server", "invalid path %q", path)
 		}
 		for _, r := range path {
 			if r < ' ' || r == 0x7f {
-				return 0, fmt.Errorf("invalid path %q", path)
+				return 0, fieldErrf("server", "invalid path %q", path)
 			}
 		}
 	}

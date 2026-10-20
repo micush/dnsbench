@@ -108,6 +108,8 @@
            color:var(--text);padding:6px 9px;font-size:1.066rem;outline:none;transition:.12s}
     .ctrl:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,124,255,.12)}
     select.ctrl{cursor:pointer}
+    .field-err{color:var(--term-err);font-size:0.884rem;margin-top:4px}
+    .ctrl.invalid,.ctrl.invalid:focus{border-color:var(--term-err);box-shadow:0 0 0 3px color-mix(in srgb,var(--term-err) 22%,transparent)}
     /* ── segmented control ── */
     .seg{display:flex;background:var(--bg3);border:1px solid var(--border);
           border-radius:var(--radius);padding:2px;gap:2px}
@@ -1398,6 +1400,34 @@ function saveHistory(h){
 }
 const runHistory=loadHistory();
 
+// Fields the server can name when it rejects a run ({"field": ...}); the value
+// is the id of the input to mark red until the user edits it.
+const INVALID_FIELDS={server:'server',protocol:'protocol'};
+function clearInvalid(){
+  document.querySelectorAll('.ctrl.invalid').forEach(e=>{ e.classList.remove('invalid'); e.removeAttribute('aria-invalid'); });
+  document.querySelectorAll('.field-err').forEach(e=>e.remove());
+}
+// Mark the named input red, say why under it, and bring the Setup tab forward
+// so the user sees it (a rejected run leaves them on the Output tab).
+function markInvalid(field,msg){
+  const id=INVALID_FIELDS[field]; const el=id&&document.getElementById(id);
+  if(!el) return;
+  clearInvalid();
+  el.classList.add('invalid');
+  el.setAttribute('aria-invalid','true');
+  const anchor=el.parentElement.style.position==='relative'?el.parentElement:el;
+  const note=document.createElement('div');
+  note.className='field-err'; note.setAttribute('role','alert');
+  note.textContent=msg||'Invalid value';
+  anchor.insertAdjacentElement('afterend',note);
+  showBenchTab('setup');
+  el.focus();
+  if(!el.dataset.invalidBound){
+    el.dataset.invalidBound='1';
+    el.addEventListener('input',clearInvalid); el.addEventListener('change',clearInvalid);
+  }
+}
+
 function getArgs(){
   const m=document.querySelector('input[name="limitMode"]:checked').value;
   return{
@@ -1439,6 +1469,7 @@ async function runOneServer(args,batch){
     .then(r=>r.json()).then(d=>{
       if(!d.ok){
         termLine('Error: '+d.error,'term-err');
+        markInvalid(d.field,d.error);
         run.status='error'; renderHistoryIfVisible();
         resolve(false); return;
       }
@@ -1490,13 +1521,13 @@ async function runOneServer(args,batch){
 async function startBench(){
   if(curJob) return;
   clearTerminal(); setStatus('starting','primary');
-  clearHighlight();
+  clearHighlight(); clearInvalid();
   const args=getArgs();
   const batch=[];   // the runs this click starts, highlighted on Results when they finish
 
   // Parse comma-separated servers
   const servers=args.server.split(',').map(s=>s.trim()).filter(Boolean);
-  if(!servers.length){ termLine('Error: no server specified','term-err'); setStatus('error','danger'); return; }
+  if(!servers.length){ termLine('Error: no server specified','term-err'); markInvalid('server','Enter a server address'); setStatus('error','danger'); return; }
   // Remember any manually-entered servers
   saveServerIfNew(args.server);
 
