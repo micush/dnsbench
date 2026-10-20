@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# dnsbench web installer: downloads the latest tagged release from GitHub and runs
+# AnyName DNS Director web installer: downloads the latest tagged release from GitHub and runs
 # its install.sh (install or in-place upgrade).
 #
-#   curl -fsSL https://raw.githubusercontent.com/micush/dnsbench/HEAD/get.sh | sudo bash
-#   curl -fsSL https://raw.githubusercontent.com/micush/dnsbench/HEAD/get.sh | sudo bash -s -- --no-start
-#   curl -fsSL https://raw.githubusercontent.com/micush/dnsbench/HEAD/get.sh | sudo bash -s -- --version v13
+#   curl -fsSL https://raw.githubusercontent.com/micush/dnsdir/HEAD/get.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/micush/dnsdir/HEAD/get.sh | sudo bash -s -- --add-user alice
+#   curl -fsSL https://raw.githubusercontent.com/micush/dnsdir/HEAD/get.sh | sudo bash -s -- --version v215
 #
 # Everything after `--` goes to install.sh (see its --help), except:
 #   --version TAG   install this tag instead of the latest one
@@ -13,14 +13,14 @@
 # highest tag that looks like v<number>. Needs curl or wget, tar and the
 # network; install.sh installs the rest.
 #
-# Test hooks (not for normal use): DNSBENCH_GET_REPO, DNSBENCH_GET_API, DNSBENCH_GET_HOST.
+# Test hooks (not for normal use): DNSDIR_GET_REPO, DNSDIR_GET_API, DNSDIR_GET_HOST.
 
 set -euo pipefail
 
 main() {
-  local repo=${DNSBENCH_GET_REPO:-micush/dnsbench}
-  local api=${DNSBENCH_GET_API:-https://api.github.com}
-  local host=${DNSBENCH_GET_HOST:-https://github.com}
+  local repo=${DNSDIR_GET_REPO:-micush/dnsdir}
+  local api=${DNSDIR_GET_API:-https://api.github.com}
+  local host=${DNSDIR_GET_HOST:-https://github.com}
   local want="" args=() tag tmp rc
 
   if [ -t 2 ]; then B=$'\033[1m'; R=$'\033[31m'; G=$'\033[32m'; N=$'\033[0m'; else B=; R=; G=; N=; fi
@@ -64,26 +64,25 @@ main() {
   if [ -n "$want" ]; then
     tag=$want
   else
-    step "Looking up the latest dnsbench version"
+    step "Looking up the latest AnyName version"
     tag=$(latest_tag) || die "could not find a tagged version of $repo (no network, GitHub rate limit, or no tags yet)"
   fi
   valid_tag "$tag" || die "bad tag name: $tag"
 
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/dnsbench-get.XXXXXX") || die "cannot create a temporary directory"
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/dnsdir-get.XXXXXX") || die "cannot create a temporary directory"
   trap 'rm -rf "$tmp"' EXIT
 
-  step "Downloading dnsbench $tag"
+  step "Downloading AnyName $tag"
   fetch "$host/$repo/archive/refs/tags/$tag.tar.gz" >"$tmp/src.tgz" || die "download of $tag failed"
   mkdir "$tmp/tree"
   tar -xzf "$tmp/src.tgz" -C "$tmp/tree" --strip-components=1 || die "$tag is not a valid archive"
   rm -f "$tmp/src.tgz"
 
-  grep -q '^module dnsbench$' "$tmp/tree/source/go.mod" 2>/dev/null || die "$tag is not a dnsbench source tree (source/go.mod is not module dnsbench)"
   [ -f "$tmp/tree/install.sh" ] && [ -f "$tmp/tree/source/VERSION" ] ||
-    die "$tag does not look like a dnsbench release (install.sh or source/VERSION missing)"
+    die "$tag does not look like an AnyName release (install.sh or source/VERSION missing)"
   local ver; ver=$(tr -d '[:space:]' <"$tmp/tree/source/VERSION")
   [[ $ver =~ ^[0-9]+$ ]] || die "$tag has a bad source/VERSION: '$ver'"
-  step "Installing dnsbench v$ver"
+  step "Installing AnyName v$ver"
 
   # Keep the terminal for install.sh's questions and sudo; the script itself
   # may be what is on our stdin.

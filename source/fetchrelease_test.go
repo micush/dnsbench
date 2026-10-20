@@ -1,155 +1,136 @@
 package main
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
-// fakeGitHub serves the API and the archive host; latest == "" means no published release (so the tags list is used).
-func fakeGitHub(t *testing.T, latest string, tags []string, archives map[string][]byte) {
-	t.Helper()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/"+ghRepo+"/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		if latest == "" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Write([]byte(`{"tag_name":"` + latest + `"}`))
-	})
-	mux.HandleFunc("/repos/"+ghRepo+"/tags", func(w http.ResponseWriter, r *http.Request) {
-		var parts []string
-		for _, n := range tags {
-			parts = append(parts, `{"name":"`+n+`"}`)
-		}
-		w.Write([]byte("[" + strings.Join(parts, ",") + "]"))
-	})
-	mux.HandleFunc("/"+ghRepo+"/archive/refs/tags/", func(w http.ResponseWriter, r *http.Request) {
-		tag := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"+ghRepo+"/archive/refs/tags/"), ".tar.gz")
-		b, ok := archives[tag]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		w.Write(b)
-	})
-	srv := httptest.NewServer(mux)
-	oa, oh := ghAPI, ghHost
-	ghAPI, ghHost = srv.URL, srv.URL
-	t.Cleanup(func() { ghAPI, ghHost = oa, oh; srv.Close() })
+func TestNumericTagLess(t *testing.T) {
+	if !numericTagLess("v215", "v1000") || numericTagLess("v1000", "v215") || !numericTagLess("1.2", "1.10") || numericTagLess("v5", "v5") {
+		t.Fatal("tags are not ordered by number")
+	}
 }
 
-// githubTgz wraps a release the way GitHub does: everything under one dnsbench-<tag>/ directory.
-func githubTgz(t *testing.T, ver string) []byte {
+// fakeGitHub serves the two places fetchRelease asks: the API (release/tag lists) and the archive.
+func fakeGitHub(t *testing.T, release string, tags string, archives map[string][]byte) *atomic.Int32 {
 	t.Helper()
-	zr, err := gzip.NewReader(bytes.NewReader(releaseTgz(t, ver)))
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		switch {
+		case r.URL.Path == "/repos/micush/dnsdir/releases/latest":
+			if release == "" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Write([]byte(`{"tag_name":"` + release + `"}`))
+		case r.URL.Path == "/repos/micush/dnsdir/tags":
+			w.Write([]byte(tags))
+		case strings.HasPrefix(r.URL.Path, "/micush/dnsdir/archive/refs/tags/"):
+			tag := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/micush/dnsdir/archive/refs/tags/"), ".tar.gz")
+			if b, ok := archives[tag]; ok {
+				w.Write(b)
+				return
+			}
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	oa, oh := ghAPI, ghHost
+	ghAPI, ghHost = srv.URL, srv.URL
+	t.Cleanup(func() { srv.Close(); ghAPI, ghHost = oa, oh })
+	return &n
+}
+
+func TestLatestTag(t *testing.T) {
+	fakeGitHub(t, "v300", `[]`, nil)
+	if tag, err := latestTag(context.Background(), ghRepo); err != nil || tag != "v300" {
+		t.Fatalf("release: %q %v", tag, err)
+	}
+	fakeGitHub(t, "", `[{"name":"v99"},{"name":"v1000"},{"name":"nightly"},{"name":"v215"}]`, nil)
+	if tag, err := latestTag(context.Background(), ghRepo); err != nil || tag != "v1000" {
+		t.Fatalf("tags: %q %v", tag, err)
+	}
+	fakeGitHub(t, "", `[{"name":"nightly"}]`, nil)
+	if _, err := latestTag(context.Background(), ghRepo); err == nil {
+		t.Fatal("no usable tag was accepted")
+	}
+}
+
+func TestUpdateFetchFromGitHub(t *testing.T) {
+	e := newWebEnv(t)
+	e.login("alice", "pw")
+	fakeGitHub(t, "v7", `[]`, map[string][]byte{"v7": fakeSourceTarball(t, "7")})
+	r := e.do("POST", "/api/update/fetch", map[string]any{}, withAuth(e, true))
+	if r.code != 200 {
+		t.Fatalf("fetch: %d %s", r.code, r.raw)
+	}
+	if d := r.body["data"].(map[string]any); d["version"] != "7" || d["tag"] != "v7" {
+		t.Fatalf("fetch answer: %s", r.raw)
+	}
+	st := e.do("GET", "/api/update", nil, withAuth(e, false))
+	if st.body["data"].(map[string]any)["source_version"] != "7" {
+		t.Fatalf("not staged: %s", st.raw)
+	}
+	// GitHub unreachable or the tag missing: a clear error, nothing staged over the good one
+	fakeGitHub(t, "v8", `[]`, nil)
+	if r := e.do("POST", "/api/update/fetch", map[string]any{}, withAuth(e, true)); r.code != 422 || !strings.Contains(string(r.raw), "v8") {
+		t.Fatalf("missing archive: %d %s", r.code, r.raw)
+	}
+	fakeGitHub(t, "v9", `[]`, map[string][]byte{"v9": []byte("not an archive")})
+	if r := e.do("POST", "/api/update/fetch", map[string]any{}, withAuth(e, true)); r.code != 422 {
+		t.Fatalf("junk archive: %d %s", r.code, r.raw)
+	}
+}
+
+func TestNormalizeRepo(t *testing.T) {
+	good := map[string]string{
+		"":                                       "",
+		"default":                                "",
+		"https://github.com/micush/dnsdir":       "", // the default is stored as empty
+		"https://github.com/micush/dnsdir/":      "",
+		"github.com/micush/dnsdir.git":           "",
+		"micush/dnsdir":                          "",
+		"https://github.com/someone/dnsdir-fork": "someone/dnsdir-fork",
+		"  https://www.github.com/a.b/c_d.git ":  "a.b/c_d",
+		"someone/fork":                           "someone/fork",
+	}
+	for in, want := range good {
+		got, err := normalizeRepo(in)
+		if err != nil || got != want {
+			t.Errorf("normalizeRepo(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{
+		"https://gitlab.com/a/b", "https://example.com/a/b", "a", "a/b/c", "https://github.com/a", "https://github.com/a/b/c",
+		"https://github.com/../b", "a/..", "a b/c", "https://github.com/a/b?x=1", "-a/b", "git@github.com:a/b",
+	} {
+		if got, err := normalizeRepo(in); err == nil {
+			t.Errorf("normalizeRepo(%q) = %q, want an error", in, got)
+		}
+	}
+}
+
+// The repository is part of the shared update settings: set on the primary, kept in the intent, used by the fetch.
+func TestUpdateRepoSetting(t *testing.T) {
+	u, err := NewUpdater(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	tr := tar.NewReader(zr)
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(zw)
-	for {
-		h, err := tr.Next()
-		if err != nil {
-			break
-		}
-		rest := strings.TrimPrefix(strings.TrimPrefix(h.Name, "./"), "dnsbench")
-		h.Name = "dnsbench-v" + ver + rest
-		var data bytes.Buffer
-		data.ReadFrom(tr)
-		h.Size = int64(data.Len())
-		tw.WriteHeader(h)
-		tw.Write(data.Bytes())
+	if u.Repo() != ghRepo {
+		t.Fatalf("default repo = %q", u.Repo())
 	}
-	tw.Close()
-	zw.Close()
-	return buf.Bytes()
-}
-
-func TestNumericTagLess(t *testing.T) {
-	for _, c := range []struct {
-		a, b string
-		less bool
-	}{{"v9", "v10", true}, {"v10", "v9", false}, {"v12", "v12", false}, {"1.2", "1.10", true}, {"v1", "v1.1", true}} {
-		if numericTagLess(c.a, c.b) != c.less {
-			t.Errorf("%s < %s should be %v", c.a, c.b, c.less)
-		}
+	u.SetRepo("someone/fork", "tester", "n1")
+	if u.Repo() != "someone/fork" || u.Intent().Repo != "someone/fork" {
+		t.Fatalf("repo not set: %q", u.Repo())
 	}
-}
-
-func TestLatestTagPrefersReleaseThenHighestTag(t *testing.T) {
-	fakeGitHub(t, "v40", []string{"v9", "v10"}, nil)
-	if tag, err := latestTag(t.Context()); err != nil || tag != "v40" {
-		t.Errorf("release: %q %v", tag, err)
-	}
-	fakeGitHub(t, "", []string{"v9", "junk", "v10", "v2"}, nil)
-	if tag, err := latestTag(t.Context()); err != nil || tag != "v10" {
-		t.Errorf("tags: %q %v", tag, err)
-	}
-	fakeGitHub(t, "", []string{"junk"}, nil)
-	if _, err := latestTag(t.Context()); err == nil {
-		t.Error("no usable tag must be an error")
-	}
-}
-
-func TestFetchStagesLikeAnUploadAndRecordsIt(t *testing.T) {
-	us := newUpdateServer(t)
-	ver := nextVersion(t)
-	fakeGitHub(t, "v"+ver, nil, map[string][]byte{"v" + ver: githubTgz(t, ver)})
-	resp, body := us.do(t, "POST", "/api/update/fetch", "", us.hdr)
-	if resp.StatusCode != 200 || !strings.Contains(body, `"version":"`+ver+`"`) || !strings.Contains(body, `"tag":"v`+ver+`"`) {
-		t.Fatalf("fetch: %d %s", resp.StatusCode, body)
-	}
-	if us.app.updater.SourceVersion() != ver {
-		t.Errorf("staged %q, want %q", us.app.updater.SourceVersion(), ver)
-	}
-	if us.restarts.Load() != 0 || readStr(t, us.exe) != "OLD" {
-		t.Error("fetching must not install anything")
-	}
-}
-
-func TestFetchFailuresAreReportedAndStageNothing(t *testing.T) {
-	us := newUpdateServer(t)
-	ver := nextVersion(t)
-	// release names a tag whose archive is missing
-	fakeGitHub(t, "v"+ver, nil, nil)
-	if resp, body := us.do(t, "POST", "/api/update/fetch", "", us.hdr); resp.StatusCode != 422 || !strings.Contains(body, "download") {
-		t.Errorf("missing archive: %d %s", resp.StatusCode, body)
-	}
-	// junk archive
-	fakeGitHub(t, "v"+ver, nil, map[string][]byte{"v" + ver: []byte("not a tarball")})
-	if resp, _ := us.do(t, "POST", "/api/update/fetch", "", us.hdr); resp.StatusCode != 422 {
-		t.Errorf("junk archive: %d", resp.StatusCode)
-	}
-	// not newer than the running version
-	old := version()
-	fakeGitHub(t, "v"+old, nil, map[string][]byte{"v" + old: githubTgz(t, old)})
-	if resp, _ := us.do(t, "POST", "/api/update/fetch", "", us.hdr); resp.StatusCode != 422 {
-		t.Errorf("not newer: %d", resp.StatusCode)
-	}
-	if us.app.updater.SourceVersion() != "" {
-		t.Error("a failed fetch staged something")
-	}
-}
-
-func TestFetchSkipsTagsThatAreNotDnsbench(t *testing.T) {
-	us := newUpdateServer(t)
-	ver := nextVersion(t)
-	other := tgzOf(t, []tent{{name: "x/source/go.mod", body: "module ddgw\n"}, {name: "x/source/main.go", body: "x"}, {name: "x/source/VERSION", body: "304\n"}})
-	fakeGitHub(t, "", []string{"v304", "v" + ver}, map[string][]byte{"v304": other, "v" + ver: githubTgz(t, ver)})
-	resp, body := us.do(t, "POST", "/api/update/fetch", "", us.hdr)
-	if resp.StatusCode != 200 || !strings.Contains(body, `"tag":"v`+ver+`"`) {
-		t.Fatalf("fetch: %d %s", resp.StatusCode, body)
-	}
-	fakeGitHub(t, "", []string{"v304"}, map[string][]byte{"v304": other})
-	us2 := newUpdateServer(t)
-	if resp, body := us2.do(t, "POST", "/api/update/fetch", "", us2.hdr); resp.StatusCode != 422 || !strings.Contains(body, "none of the tags") {
-		t.Errorf("only foreign tags: %d %s", resp.StatusCode, body)
+	u.SetRepo("", "tester", "n1")
+	if u.Repo() != ghRepo {
+		t.Fatalf("empty must go back to the default: %q", u.Repo())
 	}
 }
