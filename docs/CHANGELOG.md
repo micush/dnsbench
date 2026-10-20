@@ -1,5 +1,16 @@
 # Changelog
 
+## [v26] - 2026-10-20 — Version bump
+
+### Changed
+- Version number raised from 25 to 26 at the owner's request. No code, page, API or documentation changes since v25.
+
+### Verified
+- `CGO_ENABLED=0 go vet` and `go test ./...` from the extracted tarball.
+
+### Not verified
+- Nothing beyond what v25 lists: `contrib/uitest/ui.js` and the cgo/PAM build were not run in this sandbox. Only the native amd64 cgo build is verified with PAM.
+
 ## [v25] - 2026-10-20 — Benchmark page marks the invalid field red
 
 ### Changed
